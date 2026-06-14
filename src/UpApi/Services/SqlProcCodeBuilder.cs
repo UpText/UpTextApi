@@ -13,35 +13,41 @@ internal static class SqlProcCodeBuilder
                verb.Equals("delete", StringComparison.OrdinalIgnoreCase);
     }
 
-    public static string BuildTableProc(string service, string schema, SqlTableModel model, string verb, bool search, bool page, bool sort)
+    public static string BuildTableProc(string service, string schema, SqlTableModel model, string verb, bool search, bool page, bool sort, bool auth)
     {
         return verb.ToLowerInvariant() switch
         {
-            "all" => BuildAllTableProcs(service, schema, model, search, page, sort),
-            "get" => BuildGetTableProc(service, schema, model, search, page, sort),
-            "put" => BuildPutTableProc(service, schema, model),
-            "post" => BuildPostTableProc(service, schema, model),
-            "delete" => BuildDeleteTableProc(service, schema, model),
+            "all" => BuildAllTableProcs(service, schema, model, search, page, sort, auth),
+            "get" => BuildGetTableProc(service, schema, model, search, page, sort, auth),
+            "put" => BuildPutTableProc(service, schema, model, auth),
+            "post" => BuildPostTableProc(service, schema, model, auth),
+            "delete" => BuildDeleteTableProc(service, schema, model, auth),
             _ => string.Empty
         };
     }
 
-    private static string BuildAllTableProcs(string service, string schema, SqlTableModel model, bool search, bool paging, bool sort)
+    private static string BuildAllTableProcs(string service, string schema, SqlTableModel model, bool search, bool paging, bool sort, bool auth)
     {
         return string.Join(
             "\r\n\r\nGO\r\n\r\n",
-            BuildGetTableProc(service, schema, model, search, paging, sort).TrimEnd(),
-            BuildPostTableProc(service, schema, model).TrimEnd(),
-            BuildPutTableProc(service, schema, model).TrimEnd(),
-            BuildDeleteTableProc(service, schema, model).TrimEnd());
+            BuildGetTableProc(service, schema, model, search, paging, sort, auth).TrimEnd(),
+            BuildPostTableProc(service, schema, model, auth).TrimEnd(),
+            BuildPutTableProc(service, schema, model, auth).TrimEnd(),
+            BuildDeleteTableProc(service, schema, model, auth).TrimEnd());
     }
 
-    private static string BuildPostTableProc(string service, string schema, SqlTableModel model)
+    private static string BuildPostTableProc(string service, string schema, SqlTableModel model, bool auth)
     {
         var columns = !model.IsIdentity ? model.Columns : model.NonKeyColumns;
         var builder = new StringBuilder(6000)
             .AppendFormat("CREATE OR ALTER PROCEDURE {0}.{1}_post\r\n", service, model.Resource)
             .AppendLine("(");
+
+        if (auth)
+        {
+            builder.Append("    @auth_email NVARCHAR(255) = NULL")
+                .AppendLine(columns.Count > 0 ? "," : string.Empty);
+        }
 
         for (var index = 0; index < columns.Count; index++)
         {
@@ -96,14 +102,19 @@ internal static class SqlProcCodeBuilder
         return builder.ToString();
     }
 
-    private static string BuildDeleteTableProc(string service, string schema, SqlTableModel model)
+    private static string BuildDeleteTableProc(string service, string schema, SqlTableModel model, bool auth)
     {
         var builder = new StringBuilder(6000)
             .AppendFormat("CREATE OR ALTER PROCEDURE {0}.{1}_delete\r\n", service, model.Resource)
-            .AppendLine("(")
-            .AppendLine("    @ID varchar(max)")
-            .AppendLine(")");
+            .AppendLine("(");
 
+        builder.AppendLine(auth ? "    @ID varchar(max)," : "    @ID varchar(max)");
+        if (auth)
+        {
+            builder.AppendLine("    @auth_email NVARCHAR(255) = NULL");
+        }
+
+        builder.AppendLine(")");
         builder.AppendLine("AS");
         builder.AppendFormat("IF NOT EXISTS (SELECT {2} FROM {0}.{1} WHERE @ID = {2})\r\n", schema, model.TableName, model.KeyColumn);
         builder.AppendLine("BEGIN");
@@ -116,12 +127,18 @@ internal static class SqlProcCodeBuilder
         return builder.ToString();
     }
 
-    private static string BuildPutTableProc(string service, string schema, SqlTableModel model)
+    private static string BuildPutTableProc(string service, string schema, SqlTableModel model, bool auth)
     {
         var builder = new StringBuilder(6000)
             .AppendFormat("CREATE OR ALTER PROCEDURE {0}.{1}_put\r\n", service, model.Resource)
             .AppendLine("(")
             .AppendLine("    @ID varchar(max),");
+
+        if (auth)
+        {
+            builder.Append("    @auth_email NVARCHAR(255) = NULL")
+                .AppendLine(model.NonKeyColumns.Count > 0 ? "," : string.Empty);
+        }
 
         for (var index = 0; index < model.NonKeyColumns.Count; index++)
         {
@@ -170,13 +187,18 @@ internal static class SqlProcCodeBuilder
         return builder.ToString();
     }
 
-    private static string BuildGetTableProc(string service, string schema, SqlTableModel model, bool search, bool paging, bool sort)
+    private static string BuildGetTableProc(string service, string schema, SqlTableModel model, bool search, bool paging, bool sort, bool auth)
     {
         var builder = new StringBuilder(6000)
             .AppendFormat("--- Retrieve {0}\r\n", model.Resource)
             .AppendFormat("CREATE OR ALTER PROCEDURE {0}.{1}_get\r\n", service, model.Resource)
             .AppendLine("(")
             .AppendLine("    @ID varchar(max) = NULL,");
+
+        if (auth)
+        {
+            builder.AppendLine("    @auth_email NVARCHAR(255) = NULL,");
+        }
 
         if (search)
         {

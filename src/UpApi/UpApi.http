@@ -15,6 +15,16 @@ Accept: application/json
 
 ###
 
+GET {{UpApi_HostAddress}}/SqlLog?service=api&maxHours=24&aboveTime=500&OnlySqlError=true&FromRow=0&ToRow=100
+Accept: application/json
+
+###
+
+GET {{UpApi_HostAddress}}/ServiceLogStatus?service=api
+Accept: application/json
+
+###
+
 GET {{UpApi_HostAddress}}/images/northwind/Categories/1
 Accept: image/png
 

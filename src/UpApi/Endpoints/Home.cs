@@ -31,6 +31,17 @@ public static class Home
                 swaggerServices.Select(service =>
                     $"      <a class=\"service-link\" href=\"/docs/{Uri.EscapeDataString(service)}\">Swagger UI for {WebUtility.HtmlEncode(service)}</a>"))
             : "      <div class=\"service-link empty-state\">No Swagger services configured yet.</div>";
+        var sqlGenerators = GetSqlGenerators(serviceConfigurations);
+        var sqlGeneratorLinks = sqlGenerators.Count > 0
+            ? string.Join(
+                "\n",
+                sqlGenerators.Select(generator =>
+                    $"      <a class=\"service-link\" href=\"/sql-generator/{Uri.EscapeDataString(generator.Service)}/{Uri.EscapeDataString(generator.TableSchema)}\">SQL Generator for {WebUtility.HtmlEncode(generator.Service)}</a>"))
+            : "      <div class=\"service-link empty-state\">No SQL generators enabled.</div>";
+        var sqlLogServices = GetSqlLogServices(serviceConfigurations);
+        var sqlLogCards = sqlLogServices.Count > 0
+            ? string.Join("\n", sqlLogServices.Select(RenderSqlLogCard))
+            : "      <div class=\"service-link empty-state\">No services configured yet.</div>";
 
         return string.Join(
             "\n",
@@ -70,6 +81,22 @@ public static class Home
             "    .empty-state:hover { transform: none; box-shadow: none; border-color: #dbe4ee; }",
             "    .utility-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; }",
             "    .utility-link { width: fit-content; min-width: 140px; }",
+            "    .sql-log-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }",
+            "    .sql-log-card { overflow: hidden; border: 1px solid #dbe4ee; border-radius: 18px; background: rgba(255,255,255,0.94); }",
+            "    .sql-log-card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 16px; border-bottom: 1px solid #e7edf4; }",
+            "    .sql-log-service { margin: 0; font-family: 'Space Grotesk', sans-serif; font-size: 18px; letter-spacing: -0.025em; }",
+            $"    .sql-log-state {{ color: {BrandMuted}; font-size: 12px; }}",
+            "    .sql-log-state.error { color: #b91c1c; }",
+            "    .sql-log-table { width: 100%; border-collapse: collapse; table-layout: fixed; }",
+            "    .sql-log-table th, .sql-log-table td { padding: 10px 9px; border-bottom: 1px solid #edf2f7; text-align: right; }",
+            "    .sql-log-table tr:last-child th, .sql-log-table tr:last-child td { border-bottom: 0; }",
+            $"    .sql-log-table thead th {{ color: {BrandMuted}; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; background: #f8fafc; }}",
+            "    .sql-log-table thead th:first-child, .sql-log-table tbody th { text-align: left; }",
+            $"    .sql-log-table tbody th {{ width: 29%; color: {BrandMuted}; font-size: 12px; font-weight: 600; }}",
+            "    .metric-link { display: inline-flex; min-width: 34px; justify-content: flex-end; color: #0f172a; font-family: 'Space Grotesk', sans-serif; font-size: 16px; font-weight: 700; text-decoration: none; }",
+            $"    .metric-link:hover {{ color: {BrandTeal}; text-decoration: underline; text-underline-offset: 3px; }}",
+            "    .metric-link.user-error:not([data-value='0']) { color: #b45309; }",
+            "    .metric-link.sql-error:not([data-value='0']) { color: #b91c1c; }",
             "    @media (max-width: 820px) { .shell { padding: 18px; } .card { padding: 22px; border-radius: 24px; } .hero { grid-template-columns: 1fr; } .brand-lockup { align-items: flex-start; } }",
             "  </style>",
             "</head>",
@@ -86,18 +113,129 @@ public static class Home
             "      </section>",
             "      <div class=\"section-title\">Swagger Services</div>",
             $"      <div class=\"links\">{swaggerLinks}</div>",
+            "      <div class=\"section-title\">SQL Generators</div>",
+            $"      <div class=\"links\">{sqlGeneratorLinks}</div>",
+            "      <div class=\"section-title\">SQL Log</div>",
+            $"      <div class=\"sql-log-grid\">{sqlLogCards}</div>",
             "      <div class=\"section-title\">Utilities</div>",
             "      <div class=\"utility-row\">",
             "        <a class=\"utility-link\" href=\"/ping\">Ping</a>",
             "        <a class=\"utility-link\" href=\"/live\">Liveness</a>",
             "        <a class=\"utility-link\" href=\"/health\">Readiness</a>",
             "        <a class=\"utility-link\" href=\"/health/details\">Health Details</a>",
-            "        <a class=\"utility-link\" href=\"/docs\">Core Swagger UI</a>",
+            "        <a class=\"utility-link\" href=\"/sql-log-view\">SQL Log</a>",
             "      </div>",
             "    </div>",
             "  </main>",
+            "  <script>",
+            "    document.querySelectorAll('.sql-log-card').forEach(async card => {",
+            "      const service = card.dataset.service;",
+            "      const state = card.querySelector('.sql-log-state');",
+            "      try {",
+            "        const response = await fetch('/ServiceLogStatus?service=' + encodeURIComponent(service), { headers: { Accept: 'application/json' } });",
+            "        if (!response.ok) throw new Error('Status unavailable');",
+            "        const status = await response.json();",
+            "        card.querySelectorAll('[data-field]').forEach(link => {",
+            "          const value = status[link.dataset.field] ?? 0;",
+            "          link.textContent = Number(value).toLocaleString();",
+            "          link.dataset.value = String(value);",
+            "        });",
+            "        state.textContent = 'Live';",
+            "      } catch {",
+            "        state.textContent = 'Unavailable';",
+            "        state.classList.add('error');",
+            "        card.querySelectorAll('[data-field]').forEach(link => link.textContent = '--');",
+            "      }",
+            "    });",
+            "  </script>",
             "</body>",
             "</html>");
+    }
+
+    private static string RenderSqlLogCard(string service)
+    {
+        var encodedService = WebUtility.HtmlEncode(service);
+        var serviceAttribute = WebUtility.HtmlEncode(service);
+
+        return $$"""
+      <article class="sql-log-card" data-service="{{serviceAttribute}}">
+        <header class="sql-log-card-header">
+          <h2 class="sql-log-service">{{encodedService}}</h2>
+          <span class="sql-log-state">Loading</span>
+        </header>
+        <table class="sql-log-table">
+          <thead>
+            <tr>
+              <th>Period</th>
+              <th>Calls</th>
+              <th>User errors</th>
+              <th>SQL errors</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th>Last hour</th>
+              <td>{{RenderMetricLink(service, "callsLastHours", 1)}}</td>
+              <td>{{RenderMetricLink(service, "userErrorsLastHour", 1, userError: true)}}</td>
+              <td>{{RenderMetricLink(service, "sqlErrorsLastHour", 1, sqlError: true)}}</td>
+            </tr>
+            <tr>
+              <th>Today</th>
+              <td>{{RenderMetricLink(service, "callsToDay", today: true)}}</td>
+              <td>{{RenderMetricLink(service, "userErrorsToDay", userError: true, today: true)}}</td>
+              <td>{{RenderMetricLink(service, "sqlErrorsToDay", sqlError: true, today: true)}}</td>
+            </tr>
+            <tr>
+              <th>All time</th>
+              <td>{{RenderMetricLink(service, "calls")}}</td>
+              <td>{{RenderMetricLink(service, "userErrors", userError: true)}}</td>
+              <td>{{RenderMetricLink(service, "sqlErrors", sqlError: true)}}</td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+""";
+    }
+
+    private static string RenderMetricLink(
+        string service,
+        string field,
+        int? maxHours = null,
+        bool userError = false,
+        bool sqlError = false,
+        bool today = false)
+    {
+        var query = new Dictionary<string, string>
+        {
+            ["service"] = service
+        };
+
+        if (maxHours.HasValue)
+        {
+            query["maxHours"] = maxHours.Value.ToString();
+        }
+
+        if (userError)
+        {
+            query["UserError"] = "true";
+        }
+
+        if (sqlError)
+        {
+            query["OnlySqlError"] = "true";
+        }
+
+        if (today)
+        {
+            query["Today"] = "true";
+        }
+
+        var queryString = string.Join(
+            "&",
+            query.Select(item => $"{Uri.EscapeDataString(item.Key)}={Uri.EscapeDataString(item.Value)}"));
+        var cssClass = userError ? " user-error" : sqlError ? " sql-error" : string.Empty;
+
+        return $"<a class=\"metric-link{cssClass}\" data-field=\"{WebUtility.HtmlEncode(field)}\" data-value=\"0\" href=\"/sql-log-view?{WebUtility.HtmlEncode(queryString)}\">...</a>";
     }
 
     private static string RenderBrandPanel()
@@ -144,19 +282,68 @@ public static class Home
         IConfiguration configuration,
         ServiceConfigurations serviceConfigurations)
     {
-        var swaggerServices = configuration["SQLWEBAPI__SWAGGER"];
-        if (!string.IsNullOrWhiteSpace(swaggerServices))
+        var configuredServices = GetConfiguredSwaggerServices(configuration);
+        if (configuredServices.Count > 0)
         {
-            return swaggerServices
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Where(service => !service.Equals("true", StringComparison.OrdinalIgnoreCase) &&
-                                  !service.Equals("false", StringComparison.OrdinalIgnoreCase))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray();
+            return configuredServices;
         }
 
         return serviceConfigurations.Services.Keys
+            .Where(service =>
+                !string.IsNullOrWhiteSpace(service) &&
+                serviceConfigurations.Services.TryGetValue(service, out var config) &&
+                !string.IsNullOrWhiteSpace(config.SqlSchema) &&
+                !string.IsNullOrWhiteSpace(config.SqlConnectionString))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
+
+    private static IReadOnlyList<string> GetConfiguredSwaggerServices(IConfiguration configuration)
+    {
+        var section = configuration.GetSection("SQLWEBAPI:SWAGGER");
+        var configuredArray = section.Get<string[]>();
+        if (configuredArray is { Length: > 0 })
+        {
+            return NormalizeSwaggerServices(configuredArray);
+        }
+
+        var configuredValue = configuration["SQLWEBAPI:SWAGGER"] ?? configuration["SQLWEBAPI__SWAGGER"];
+        return string.IsNullOrWhiteSpace(configuredValue)
+            ? Array.Empty<string>()
+            : NormalizeSwaggerServices(configuredValue.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    }
+
+    private static IReadOnlyList<string> NormalizeSwaggerServices(IEnumerable<string> services)
+    {
+        return services
+            .Where(service => !string.IsNullOrWhiteSpace(service) &&
+                              !service.Equals("true", StringComparison.OrdinalIgnoreCase) &&
+                              !service.Equals("false", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<SqlGeneratorLink> GetSqlGenerators(ServiceConfigurations serviceConfigurations)
+    {
+        return serviceConfigurations.Services
+            .Where(service =>
+                !string.IsNullOrWhiteSpace(service.Key) &&
+                service.Value.SqlGenerator &&
+                !string.IsNullOrWhiteSpace(service.Value.TableSchema) &&
+                !string.IsNullOrWhiteSpace(service.Value.SqlSchema) &&
+                !string.IsNullOrWhiteSpace(service.Value.SqlConnectionString))
+            .Select(service => new SqlGeneratorLink(service.Key, service.Value.TableSchema))
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> GetSqlLogServices(ServiceConfigurations serviceConfigurations)
+    {
+        return serviceConfigurations.Services.Keys
+            .Where(service => !string.IsNullOrWhiteSpace(service))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(service => service, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private sealed record SqlGeneratorLink(string Service, string TableSchema);
 }

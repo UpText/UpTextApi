@@ -19,7 +19,8 @@ public sealed class SqlWebApiExecutor(
     IMemoryCache memoryCache,
     IConfiguration configuration,
     ISqlLog sqlLog,
-    ILogger<SqlWebApiExecutor> logger) : ISqlWebApiExecutor
+    ILogger<SqlWebApiExecutor> logger,
+    IHostEnvironment environment) : ISqlWebApiExecutor
 {
     private static readonly JsonSerializerOptions TableJsonSerializerOptions = new()
     {
@@ -82,7 +83,23 @@ public sealed class SqlWebApiExecutor(
 
             if (requestBody.Length > 1 && requestBody.StartsWith("{", StringComparison.Ordinal) && requestBody.EndsWith("}", StringComparison.Ordinal))
             {
-                requestJson = JsonNode.Parse(requestBody);
+                try
+                {
+                    requestJson = JsonNode.Parse(requestBody);
+                }
+                catch (JsonException ex)
+                {
+                    return await LogAndReturnAsync(
+                        ErrorResult(StatusCodes.Status400BadRequest, ex.Message),
+                        service,
+                        $"[{sqlSchema}].{procedureName}",
+                        requestBody,
+                        timer,
+                        StatusCodes.Status400BadRequest,
+                        ex.Message,
+                        ex.Message,
+                        cancellationToken);
+                }
             }
         }
 
@@ -184,17 +201,17 @@ public sealed class SqlWebApiExecutor(
                 responseBytes is null)
             {
                 var bodyForToken = responseText ?? jsonData;
-                if (string.IsNullOrWhiteSpace(bodyForToken))
+                if (string.IsNullOrWhiteSpace(bodyForToken) || IsEmptyJsonArray(bodyForToken))
                 {
                     return await LogAndReturnAsync(
-                        new SqlWebApiHttpResult(statusCode: StatusCodes.Status404NotFound),
-                        sqlSchema,
+                        ErrorResult(StatusCodes.Status401Unauthorized, "Invalid username or password"),
+                        service,
                         sqlExec,
                         requestBody,
                         timer,
-                        StatusCodes.Status404NotFound,
-                        string.Empty,
-                        string.Empty,
+                        StatusCodes.Status401Unauthorized,
+                        "Invalid username or password",
+                        "Invalid username or password",
                         cancellationToken);
                 }
 
@@ -212,7 +229,7 @@ public sealed class SqlWebApiExecutor(
                 {
                     return await LogAndReturnAsync(
                         ErrorResult(StatusCodes.Status500InternalServerError, "Token generation failed"),
-                        sqlSchema,
+                        service,
                         sqlExec,
                         requestBody,
                         timer,
@@ -225,7 +242,7 @@ public sealed class SqlWebApiExecutor(
                 var tokenResponse = JsonSerializer.Serialize(new { token });
                 return await LogAndReturnAsync(
                     JsonResult(new { token }, StatusCodes.Status200OK),
-                    sqlSchema,
+                    service,
                     sqlExec,
                     requestBody,
                     timer,
@@ -249,7 +266,7 @@ public sealed class SqlWebApiExecutor(
                     statusCode: statusCode,
                     contentType: responseContentType,
                     bytes: responseBytes),
-                    sqlSchema,
+                    service,
                     sqlExec,
                     requestBody,
                     timer,
@@ -266,7 +283,7 @@ public sealed class SqlWebApiExecutor(
                     statusCode: statusCode,
                     contentType: responseContentType,
                     text: responseText),
-                    sqlSchema,
+                    service,
                     sqlExec,
                     requestBody,
                     timer,
@@ -324,7 +341,7 @@ public sealed class SqlWebApiExecutor(
                     contentType: responseContentType,
                     text: responseBody,
                     headers: headers),
-                sqlSchema,
+                service,
                 sqlExec,
                 requestBody,
                 timer,
@@ -335,7 +352,7 @@ public sealed class SqlWebApiExecutor(
         }
         catch (SqlException ex)
         {
-            logger.LogError(ex, "Sql exception while executing {Procedure}", command.CommandText);
+            LogExecutionError(ex, "Sql exception while executing {Procedure}", command.CommandText);
             var statusCode = ResolveStatusCode(command);
             if (statusCode < 400)
             {
@@ -346,7 +363,7 @@ public sealed class SqlWebApiExecutor(
             var publicMessage = statusCode == 500 ? "Database Error" : errorText;
             return await LogAndReturnAsync(
                 ErrorResult(statusCode, publicMessage),
-                sqlSchema,
+                service,
                 sqlExec,
                 requestBody,
                 timer,
@@ -357,10 +374,10 @@ public sealed class SqlWebApiExecutor(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Unhandled exception while executing {Procedure}", command.CommandText);
+            LogExecutionError(ex, "Unhandled exception while executing {Procedure}", command.CommandText);
             return await LogAndReturnAsync(
                 ErrorResult(StatusCodes.Status400BadRequest, ex.Message),
-                sqlSchema,
+                service,
                 command.CommandText,
                 requestBody,
                 timer,
@@ -371,9 +388,20 @@ public sealed class SqlWebApiExecutor(
         }
     }
 
+    private void LogExecutionError(Exception ex, string messageTemplate, string procedure)
+    {
+        if (environment.IsDevelopment())
+        {
+            logger.LogError(ex, messageTemplate, procedure);
+            return;
+        }
+
+        logger.LogError("{Message}. Procedure={Procedure}. Error={Error}", messageTemplate.Replace("{Procedure}", procedure), procedure, ex.Message);
+    }
+
     private async Task<IResult> LogAndReturnAsync(
         IResult result,
-        string apiName,
+        string service,
         string execString,
         string requestBody,
         Stopwatch timer,
@@ -391,7 +419,7 @@ public sealed class SqlWebApiExecutor(
         timer.Stop();
         await sqlLog.LogAsync(
             new SqlLogEntry(
-                ApiName: apiName,
+                ApiName: service,
                 MsUsed: timer.ElapsedMilliseconds.ToString(),
                 ReturnValue: statusCode,
                 RequestBody: requestBody,

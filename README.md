@@ -48,6 +48,8 @@ Example:
   "Services": {
     "api": {
       "SqlSchema": "api",
+      "TableSchema": "dbo",
+      "SqlGenerator": true,
       "SqlConnectionString": "Server=localhost,1433;Initial Catalog=MyDb;User ID=upservice;Password=VerySecret!321;Encrypt=False;TrustServerCertificate=True;"
     }
   }
@@ -85,6 +87,8 @@ docker run --rm \
   -e JWT_AUDIENCE=UpApiClient \
   -e JWT_HOURS=8 \
   -e Services__api__SqlSchema=api \
+  -e Services__api__TableSchema=dbo \
+  -e Services__api__SqlGenerator=true \
   -e 'Services__api__SqlConnectionString=Server=host.docker.internal,1433;Initial Catalog=MyDb;User ID=upservice;Password=VerySecret!321;Encrypt=False;TrustServerCertificate=True;' \
   uptext/upapi
 ```
@@ -123,6 +127,8 @@ Minimal configuration example:
   "Services": {
     "api": {
       "SqlSchema": "api",
+      "TableSchema": "dbo",
+      "SqlGenerator": true,
       "SqlConnectionString": "Server=localhost,1433;Initial Catalog=MyDb;User ID=upservice;Password=VerySecret!321;Encrypt=False;TrustServerCertificate=True;"
     }
   }
@@ -170,21 +176,45 @@ Configure it with a `SqlLog` section:
   "SqlLog": {
     "ConnectionString": "Server=localhost,1433;Initial Catalog=MyDb;User ID=upservice;Password=VerySecret!321;Encrypt=False;TrustServerCertificate=True;",
     "Schema": "api",
-    "TableName": "log"
+    "TableName": "log",
+    "CleanupEnabled": true,
+    "RetentionDays": 30,
+    "CleanupBatchSize": 5000
   }
 }
 ```
 
+The equivalent Docker environment variables are:
+
+```text
+SqlLog__ConnectionString=Server=...
+SqlLog__Schema=api
+SqlLog__TableName=log
+SqlLog__CleanupEnabled=true
+SqlLog__RetentionDays=30
+SqlLog__CleanupBatchSize=5000
+```
+
 Notes:
 
-- `ConnectionString` is optional if `SqlServerLogDb` is set instead
+- `ConnectionString` enables SQL logging and installs the retention background service
+- if `ConnectionString` is empty or absent, the retention background service is not installed
 - `Schema` defaults to `dbo`, but `api` is recommended so the log table stays with the rest of the service objects
 - `TableName` defaults to `log`
 - the schema and table name must be simple SQL identifiers using letters, numbers, or `_`
+- `CleanupEnabled` defaults to `true`
+- `RetentionDays` defaults to `30`
+- `CleanupBatchSize` defaults to `5000`
+
+Retention cleanup runs once when the application starts and every 24 hours after
+that. Rows older than `RetentionDays` are deleted in batches. Set
+`CleanupEnabled` to `false` to retain rows indefinitely.
 
 For local development, `UpApi` can create the log table automatically at startup if it does not already exist.
 
-For production, it is better to have `dbo` pre-create `api.log` and grant only `INSERT` to `upservice`. That keeps the runtime account from needing table-creation permissions.
+For production, it is better to have `dbo` pre-create `api.log` and grant
+`INSERT`, `SELECT`, and `DELETE` to `upservice`. That keeps the runtime account
+from needing table-creation permissions.
 
 Recommended setup:
 
@@ -204,8 +234,35 @@ CREATE TABLE [api].[log](
     CONSTRAINT [PK_api_log] PRIMARY KEY CLUSTERED ([Id] ASC)
 );
 
-GRANT INSERT ON [api].[log] TO upservice;
+CREATE INDEX [IX_log_TimeStamp] ON [api].[log] ([TimeStamp]);
+
+GRANT INSERT, SELECT, DELETE ON [api].[log] TO upservice;
 ```
+
+Read log entries with `GET /SqlLog`. All query parameters are optional:
+
+- `service`: match the log row's `ApiName`
+- `maxHours`: include entries from the last number of hours
+- `aboveTime`: include entries taking longer than this number of milliseconds
+- `OnlySqlError=true`: include entries with `ReturnValue >= 500`
+- `UserError=true`: include entries with `ReturnValue >= 400` and `< 500`
+- `Today=true`: include entries since SQL Server midnight
+- `FromRow`: zero-based first row to return; defaults to `0`
+- `ToRow`: zero-based last row to return, inclusive; defaults to `100`
+
+Rows are returned newest first. If both error flags are `true`, all entries with
+`ReturnValue >= 400` are returned.
+
+Open `/sql-log-view` for a browser-based query and paging interface. It displays
+20 rows per page and applies the same filters as the JSON endpoint.
+
+Get aggregate totals for one service with
+`GET /ServiceLogStatus?service=api`. The response contains call, user-error, and
+SQL-error counts for the rolling last hour, today since SQL Server midnight,
+and all time.
+
+The home page displays these totals for every configured service. Each value
+links to `/sql-log-view` with the matching service, time, and error filters.
 
 Typical uses:
 
@@ -633,13 +690,16 @@ If you create a procedure named `login_post`, `UpApi` can turn its result into a
 POST /api/login
 ```
 
-If the procedure returns a row or JSON object with claims, the API responds with:
+If the procedure returns one row or a JSON object with claims, the API responds with:
 
 ```json
 {
   "token": "..."
 }
 ```
+
+If the credentials do not match, return no rows. `UpApi` responds with `401 Unauthorized`
+and `{"message":"Invalid username or password"}`.
 
 ### 2. `@auth_*` parameters protect endpoints
 
@@ -740,6 +800,7 @@ Routes:
 
 - `/SqlGenerator`
 - `/{service}/sql-generator`
+- `/sql-generator/{service}/{tableSchema}` (HTML UI)
 
 Example:
 
@@ -760,6 +821,13 @@ Optional flags:
 - `Paging=true`
 - `Sort=true`
 - `Search=true`
+
+Set `Services:{service}:SqlGenerator` to `false` to disable SQL generation and
+hide that service's generator link from the home page. The setting defaults to
+`true` for backward compatibility.
+
+Set `Services:{service}:TableSchema` to the schema containing the source tables.
+It defaults to `dbo` and is included in the SQL generator UI URL.
 
 ## Paging, Sorting, And Filtering
 

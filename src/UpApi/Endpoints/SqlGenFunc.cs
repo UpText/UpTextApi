@@ -85,6 +85,7 @@ public static partial class SqlGenFunc
             parameters.Paging ?? false,
             parameters.Sort ?? false,
             parameters.Search ?? false,
+            parameters.Auth ?? false,
             serviceConfigResolver,
             loggerFactory,
             cancellationToken);
@@ -105,6 +106,7 @@ public static partial class SqlGenFunc
             parameters.Paging ?? false,
             parameters.Sort ?? false,
             parameters.Search ?? false,
+            parameters.Auth ?? false,
             serviceConfigResolver,
             loggerFactory,
             cancellationToken);
@@ -118,6 +120,7 @@ public static partial class SqlGenFunc
         bool paging,
         bool sort,
         bool search,
+        bool auth,
         IServiceConfigResolver serviceConfigResolver,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
@@ -130,6 +133,12 @@ public static partial class SqlGenFunc
             {
                 return Task.FromResult<IResult>(
                     Results.Text("Service configuration was not found.", "text/plain", statusCode: StatusCodes.Status500InternalServerError));
+            }
+
+            if (!config.SqlGenerator)
+            {
+                return Task.FromResult<IResult>(
+                    Results.Text("SQL generation is disabled for this service.", "text/plain", statusCode: StatusCodes.Status403Forbidden));
             }
 
             if (string.IsNullOrWhiteSpace(config.SqlConnectionString))
@@ -157,7 +166,7 @@ public static partial class SqlGenFunc
             }
 
             var tableModel = SqlTableModelBuilder.ConstructTableModel(config.SqlConnectionString, schema, table, table, cancellationToken);
-            var code = SqlProcCodeBuilder.BuildTableProc(config.SqlSchema, schema, tableModel, verb, search, paging, sort);
+            var code = SqlProcCodeBuilder.BuildTableProc(config.SqlSchema, schema, tableModel, verb, search, paging, sort, auth);
 
             return Task.FromResult<IResult>(Results.Text(code, "text/plain; charset=utf-8"));
         }
@@ -165,7 +174,7 @@ public static partial class SqlGenFunc
         {
             logger.LogError(ex, "SQL generation failed for service {Service}", service);
             return Task.FromResult<IResult>(
-                Results.Text("Failed to generate SQL.", "text/plain", statusCode: StatusCodes.Status500InternalServerError));
+                Results.Text(ex.Message, "text/plain", statusCode: StatusCodes.Status500InternalServerError));
         }
     }
 
@@ -202,6 +211,8 @@ public static partial class SqlGenFunc
         public bool? Sort { get; init; }
 
         public bool? Search { get; init; }
+
+        public bool? Auth { get; init; }
     }
 
     public sealed class SqlGenRequest
@@ -223,5 +234,7 @@ public static partial class SqlGenFunc
         public bool? Sort { get; init; }
 
         public bool? Search { get; init; }
+
+        public bool? Auth { get; init; }
     }
 }

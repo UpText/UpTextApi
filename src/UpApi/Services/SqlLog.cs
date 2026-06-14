@@ -59,6 +59,16 @@ BEGIN
         ALLOW_PAGE_LOCKS = ON
     ) ON [PRIMARY]
 END;
+
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE object_id = OBJECT_ID('[{schema}].[{tableName}]')
+      AND name = 'IX_{tableName}_TimeStamp'
+)
+BEGIN
+    CREATE INDEX [IX_{tableName}_TimeStamp]
+        ON [{schema}].[{tableName}] ([TimeStamp]);
+END;
 """;
 
         try
@@ -107,11 +117,264 @@ VALUES
             command.Parameters.AddWithValue("@Jwt", ToDbValue(entry.Jwt));
             command.Parameters.AddWithValue("@UnexpectedError", ToDbValue(entry.UnexpectedError));
             await command.ExecuteNonQueryAsync(cancellationToken);
+            WriteConsoleLine(entry, schema, tableName);
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Failed to write SQL log entry for {ApiName}", entry.ApiName);
         }
+    }
+
+    public async Task<long> PurgeOlderThanAsync(
+        TimeSpan retention,
+        int batchSize,
+        CancellationToken cancellationToken = default)
+    {
+        if (retention <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(retention), "Retention must be greater than zero.");
+        }
+
+        if (retention.TotalDays > int.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(nameof(retention), "Retention is too large.");
+        }
+
+        if (batchSize <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(batchSize), "Batch size must be greater than zero.");
+        }
+
+        if (!TryGetValidatedIdentifiers(out var schema, out var tableName))
+        {
+            throw new InvalidOperationException("SqlLog is not configured.");
+        }
+
+        var sqlDelete = $"""
+DECLARE @Deleted int = 1;
+DECLARE @TotalDeleted bigint = 0;
+DECLARE @Cutoff datetime = DATEADD(DAY, -@RetentionDays, GETDATE());
+
+WHILE @Deleted > 0
+BEGIN
+    DELETE TOP (@BatchSize)
+    FROM [{schema}].[{tableName}]
+    WHERE [TimeStamp] < @Cutoff;
+
+    SET @Deleted = @@ROWCOUNT;
+    SET @TotalDeleted += @Deleted;
+END;
+
+SELECT @TotalDeleted;
+""";
+
+        await using var connection = new SqlConnection(sqlLogOptions.ConnectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = new SqlCommand(sqlDelete, connection);
+        command.Parameters.Add(new SqlParameter("@BatchSize", SqlDbType.Int) { Value = batchSize });
+        command.Parameters.Add(new SqlParameter("@RetentionDays", SqlDbType.Int)
+        {
+            Value = Convert.ToInt32(Math.Ceiling(retention.TotalDays))
+        });
+
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return Convert.ToInt64(result);
+    }
+
+    public async Task<IReadOnlyList<SqlLogRow>> ReadAsync(
+        string? service,
+        int? maxHours,
+        int? aboveTime,
+        bool? onlySqlError,
+        bool? userError,
+        bool? today,
+        int fromRow,
+        int toRow,
+        CancellationToken cancellationToken = default)
+    {
+        if (!TryGetValidatedIdentifiers(out var schema, out var tableName))
+        {
+            throw new InvalidOperationException("SqlLog is not configured.");
+        }
+
+        var filters = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(service))
+        {
+            filters.Add("[ApiName] = @Service");
+        }
+
+        if (maxHours.HasValue)
+        {
+            filters.Add("[TimeStamp] >= DATEADD(HOUR, -@MaxHours, GETDATE())");
+        }
+
+        if (aboveTime.HasValue)
+        {
+            filters.Add("[MsUsed] > @AboveTime");
+        }
+
+        if (today == true)
+        {
+            filters.Add("[TimeStamp] >= CONVERT(date, GETDATE())");
+        }
+
+        if (onlySqlError == true && userError == true)
+        {
+            filters.Add("[ReturnValue] >= 400");
+        }
+        else if (onlySqlError == true)
+        {
+            filters.Add("[ReturnValue] >= 500");
+        }
+        else if (userError == true)
+        {
+            filters.Add("[ReturnValue] >= 400 AND [ReturnValue] < 500");
+        }
+
+        var whereClause = filters.Count == 0
+            ? string.Empty
+            : $"WHERE {string.Join(" AND ", filters)}";
+        var sqlSelect = $"""
+SELECT
+    [Id],
+    [ApiName],
+    [SwaServer],
+    [MsUsed],
+    [TimeStamp],
+    [ReturnValue],
+    [RequestBody],
+    [ReturnBody],
+    [ExecString],
+    [jwt],
+    [UnexpectedError]
+FROM [{schema}].[{tableName}]
+{whereClause}
+ORDER BY [TimeStamp] DESC, [Id] DESC
+OFFSET @FromRow ROWS
+FETCH NEXT @RowCount ROWS ONLY;
+""";
+
+        await using var connection = new SqlConnection(sqlLogOptions.ConnectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = new SqlCommand(sqlSelect, connection);
+
+        if (!string.IsNullOrWhiteSpace(service))
+        {
+            command.Parameters.Add(new SqlParameter("@Service", SqlDbType.NVarChar, -1) { Value = service });
+        }
+
+        if (maxHours.HasValue)
+        {
+            command.Parameters.Add(new SqlParameter("@MaxHours", SqlDbType.Int) { Value = maxHours.Value });
+        }
+
+        if (aboveTime.HasValue)
+        {
+            command.Parameters.Add(new SqlParameter("@AboveTime", SqlDbType.Int) { Value = aboveTime.Value });
+        }
+
+        command.Parameters.Add(new SqlParameter("@FromRow", SqlDbType.Int) { Value = fromRow });
+        command.Parameters.Add(new SqlParameter("@RowCount", SqlDbType.Int) { Value = toRow - fromRow + 1 });
+
+        var rows = new List<SqlLogRow>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            rows.Add(new SqlLogRow(
+                Id: reader.GetInt32(0),
+                ApiName: GetNullableString(reader, 1),
+                SwaServer: GetNullableString(reader, 2),
+                MsUsed: GetNullableInt32(reader, 3),
+                TimeStamp: GetNullableDateTime(reader, 4),
+                ReturnValue: GetNullableInt32(reader, 5),
+                RequestBody: GetNullableString(reader, 6),
+                ReturnBody: GetNullableString(reader, 7),
+                ExecString: GetNullableString(reader, 8),
+                Jwt: GetNullableString(reader, 9),
+                UnexpectedError: GetNullableString(reader, 10)));
+        }
+
+        return rows;
+    }
+
+    public async Task<ServiceLogStatusResult> ReadServiceStatusAsync(
+        string service,
+        CancellationToken cancellationToken = default)
+    {
+        if (!TryGetValidatedIdentifiers(out var schema, out var tableName))
+        {
+            throw new InvalidOperationException("SqlLog is not configured.");
+        }
+
+        var sqlSelect = $"""
+SELECT
+    COALESCE(SUM(CASE
+        WHEN [TimeStamp] >= DATEADD(HOUR, -1, GETDATE()) THEN CAST(1 AS bigint)
+        ELSE CAST(0 AS bigint)
+    END), 0) AS [CallsLastHours],
+    COALESCE(SUM(CASE
+        WHEN [TimeStamp] >= DATEADD(HOUR, -1, GETDATE())
+         AND [ReturnValue] >= 400 AND [ReturnValue] < 500 THEN CAST(1 AS bigint)
+        ELSE CAST(0 AS bigint)
+    END), 0) AS [UserErrorsLastHour],
+    COALESCE(SUM(CASE
+        WHEN [TimeStamp] >= DATEADD(HOUR, -1, GETDATE())
+         AND [ReturnValue] >= 500 THEN CAST(1 AS bigint)
+        ELSE CAST(0 AS bigint)
+    END), 0) AS [SqlErrorsLastHour],
+    COALESCE(SUM(CASE
+        WHEN [TimeStamp] >= CONVERT(date, GETDATE()) THEN CAST(1 AS bigint)
+        ELSE CAST(0 AS bigint)
+    END), 0) AS [CallsToDay],
+    COALESCE(SUM(CASE
+        WHEN [TimeStamp] >= CONVERT(date, GETDATE())
+         AND [ReturnValue] >= 400 AND [ReturnValue] < 500 THEN CAST(1 AS bigint)
+        ELSE CAST(0 AS bigint)
+    END), 0) AS [UserErrorsToDay],
+    COALESCE(SUM(CASE
+        WHEN [TimeStamp] >= CONVERT(date, GETDATE())
+         AND [ReturnValue] >= 500 THEN CAST(1 AS bigint)
+        ELSE CAST(0 AS bigint)
+    END), 0) AS [SqlErrorsToDay],
+    COUNT_BIG(*) AS [Calls],
+    COALESCE(SUM(CASE
+        WHEN [ReturnValue] >= 400 AND [ReturnValue] < 500 THEN CAST(1 AS bigint)
+        ELSE CAST(0 AS bigint)
+    END), 0) AS [UserErrors],
+    COALESCE(SUM(CASE
+        WHEN [ReturnValue] >= 500 THEN CAST(1 AS bigint)
+        ELSE CAST(0 AS bigint)
+    END), 0) AS [SqlErrors]
+FROM [{schema}].[{tableName}]
+WHERE [ApiName] = @Service;
+""";
+
+        await using var connection = new SqlConnection(sqlLogOptions.ConnectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = new SqlCommand(sqlSelect, connection);
+        command.Parameters.Add(new SqlParameter("@Service", SqlDbType.NVarChar, -1) { Value = service });
+
+        await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SingleRow, cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return new ServiceLogStatusResult(0, 0, 0, 0, 0, 0, 0, 0, 0);
+        }
+
+        return new ServiceLogStatusResult(
+            CallsLastHours: reader.GetInt64(0),
+            UserErrorsLastHour: reader.GetInt64(1),
+            SqlErrorsLastHour: reader.GetInt64(2),
+            CallsToDay: reader.GetInt64(3),
+            UserErrorsToDay: reader.GetInt64(4),
+            SqlErrorsToDay: reader.GetInt64(5),
+            Calls: reader.GetInt64(6),
+            UserErrors: reader.GetInt64(7),
+            SqlErrors: reader.GetInt64(8));
     }
 
     private bool TryGetValidatedIdentifiers(
@@ -152,4 +415,78 @@ VALUES
 
     private static object ToDbValue(string? value)
         => string.IsNullOrWhiteSpace(value) ? DBNull.Value : value;
+
+    private static string? GetNullableString(SqlDataReader reader, int ordinal)
+        => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
+
+    private static int? GetNullableInt32(SqlDataReader reader, int ordinal)
+        => reader.IsDBNull(ordinal) ? null : reader.GetInt32(ordinal);
+
+    private static DateTime? GetNullableDateTime(SqlDataReader reader, int ordinal)
+        => reader.IsDBNull(ordinal) ? null : reader.GetDateTime(ordinal);
+
+    private static void WriteConsoleLine(SqlLogEntry entry, string schema, string tableName)
+    {
+        var originalColor = Console.ForegroundColor;
+
+        try
+        {
+            Console.ForegroundColor = GetStatusColor(entry.ReturnValue);
+            Console.Write("[SqlLog] ");
+
+            Console.ForegroundColor = ConsoleColor.Gray;
+            Console.Write($"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss} ");
+
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.Write(entry.ApiName);
+
+            Console.ForegroundColor = ConsoleColor.Gray;
+            Console.Write(" | status ");
+
+            Console.ForegroundColor = GetStatusColor(entry.ReturnValue);
+            Console.Write(entry.ReturnValue);
+
+            Console.ForegroundColor = ConsoleColor.Gray;
+            Console.Write(" | ");
+
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.Write($"{ParseMsUsed(entry.MsUsed)} ms");
+
+            Console.ForegroundColor = ConsoleColor.Gray;
+            Console.Write($" | {schema}.{tableName}");
+
+            if (!string.IsNullOrWhiteSpace(entry.ExecString))
+            {
+                Console.Write(" | ");
+                Console.ForegroundColor = ConsoleColor.White;
+                Console.Write(entry.ExecString);
+            }
+
+            var consoleError = !string.IsNullOrWhiteSpace(entry.UnexpectedError)
+                ? entry.UnexpectedError
+                : entry.ReturnValue >= 400
+                    ? entry.ReturnBody
+                    : null;
+
+            if (!string.IsNullOrWhiteSpace(consoleError))
+            {
+                Console.Write(" | ");
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.Write(consoleError);
+            }
+
+            Console.WriteLine();
+        }
+        finally
+        {
+            Console.ForegroundColor = originalColor;
+        }
+    }
+
+    private static ConsoleColor GetStatusColor(int statusCode)
+        => statusCode >= 500
+            ? ConsoleColor.Red
+            : statusCode >= 400
+                ? ConsoleColor.Yellow
+                : ConsoleColor.Green;
 }

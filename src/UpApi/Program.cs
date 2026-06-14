@@ -87,6 +87,12 @@ builder.Services.AddSingleton<IServiceConfigResolver, ServiceConfigResolver>();
 builder.Services.AddSingleton<ISqlWebApiExecutor, SqlWebApiExecutor>();
 builder.Services.AddSingleton<ISqlLog, SqlLog>();
 
+var sqlLogConnectionString = builder.Configuration[$"{SqlLogOptions.SectionName}:ConnectionString"];
+if (!string.IsNullOrWhiteSpace(sqlLogConnectionString))
+{
+    builder.Services.AddHostedService<SqlLogCleanupService>();
+}
+
 var app = builder.Build();
 await app.Services.GetRequiredService<ISqlLog>().EnsureTableAsync();
 
@@ -109,8 +115,12 @@ app.MapPing();
 app.MapHealth();
 app.MapHome();
 app.MapServerTime();
+app.MapServiceLogStatus();
 app.MapSqlGenFunc();
+app.MapSqlGeneratorUi();
 app.MapSqlImageFunc();
+app.MapSqlLog();
+app.MapSqlLogUi();
 app.MapSqlWebApi();
 app.MapSqlWebSiteDefinition();
 app.MapServiceOpenApi();

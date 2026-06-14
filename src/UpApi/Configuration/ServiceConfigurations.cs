@@ -10,5 +10,7 @@ public sealed class ServiceConfigurations
 public sealed class ServiceConfiguration
 {
     public string SqlSchema { get; set; } = string.Empty;
+    public string TableSchema { get; set; } = "dbo";
     public string SqlConnectionString { get; set; } = string.Empty;
+    public bool SqlGenerator { get; set; } = true;
 }
