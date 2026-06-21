@@ -29,7 +29,10 @@ public static class SqlLogEndpoint
         [FromQuery(Name = "UserError")] bool? userError = null,
         [FromQuery(Name = "Today")] bool? today = null,
         [FromQuery(Name = "FromRow")] int fromRow = 0,
-        [FromQuery(Name = "ToRow")] int toRow = 100)
+        [FromQuery(Name = "ToRow")] int toRow = 100,
+        string? procedure = null,
+        string sortBy = "time",
+        string sortDirection = "desc")
     {
         if (maxHours < 0)
         {
@@ -51,6 +54,22 @@ public static class SqlLogEndpoint
             return Results.Text("ToRow must be greater than or equal to FromRow.", "text/plain", statusCode: StatusCodes.Status400BadRequest);
         }
 
+        if (!TryParseSortColumn(sortBy, out var sortColumn))
+        {
+            return Results.Text(
+                "sortBy must be one of: time, service, status, duration, server, sqlExecution.",
+                "text/plain",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        if (!TryParseSortDirection(sortDirection, out var direction))
+        {
+            return Results.Text(
+                "sortDirection must be either asc or desc.",
+                "text/plain",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
         try
         {
             var rows = await sqlLog.ReadAsync(
@@ -60,8 +79,11 @@ public static class SqlLogEndpoint
                 onlySqlError,
                 userError,
                 today,
+                procedure,
                 fromRow,
                 toRow,
+                sortColumn,
+                direction,
                 cancellationToken);
 
             return Results.Json(rows);
@@ -71,5 +93,44 @@ public static class SqlLogEndpoint
             loggerFactory.CreateLogger("SqlLogEndpoint").LogError(ex, "Failed to read SQL log entries");
             return Results.Text("Failed to read SQL log entries.", "text/plain", statusCode: StatusCodes.Status500InternalServerError);
         }
+    }
+
+    private static bool TryParseSortColumn(string value, out SqlLogSortColumn sortColumn)
+    {
+        sortColumn = value.ToLowerInvariant() switch
+        {
+            "time" => SqlLogSortColumn.Time,
+            "service" => SqlLogSortColumn.Service,
+            "status" => SqlLogSortColumn.Status,
+            "duration" => SqlLogSortColumn.Duration,
+            "server" => SqlLogSortColumn.Server,
+            "sqlexecution" => SqlLogSortColumn.SqlExecution,
+            _ => default
+        };
+
+        return value.Equals("time", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("service", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("status", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("duration", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("server", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("sqlExecution", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryParseSortDirection(string value, out SqlLogSortDirection sortDirection)
+    {
+        if (value.Equals("asc", StringComparison.OrdinalIgnoreCase))
+        {
+            sortDirection = SqlLogSortDirection.Asc;
+            return true;
+        }
+
+        if (value.Equals("desc", StringComparison.OrdinalIgnoreCase))
+        {
+            sortDirection = SqlLogSortDirection.Desc;
+            return true;
+        }
+
+        sortDirection = default;
+        return false;
     }
 }
