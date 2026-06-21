@@ -22,6 +22,20 @@ public sealed class SqlWebApiExecutor(
     ILogger<SqlWebApiExecutor> logger,
     IHostEnvironment environment) : ISqlWebApiExecutor
 {
+    private const string RedactedValue = "[REDACTED]";
+
+    private static readonly string[] SensitiveParameterNameFragments =
+    [
+        "password",
+        "token",
+        "secret",
+        "apikey",
+        "api_key",
+        "authorization",
+        "access_token",
+        "refresh_token"
+    ];
+
     private static readonly JsonSerializerOptions TableJsonSerializerOptions = new()
     {
         WriteIndented = true,
@@ -33,6 +47,13 @@ public sealed class SqlWebApiExecutor(
             new DbNullConverter(),
             new DateOnlyConverter()
         }
+    };
+
+    private static readonly JsonSerializerOptions LogJsonSerializerOptions = new()
+    {
+        WriteIndented = false,
+        DefaultIgnoreCondition = JsonIgnoreCondition.Never,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
     public async Task<IResult> ExecuteAsync(
@@ -422,7 +443,7 @@ public sealed class SqlWebApiExecutor(
                 ApiName: service,
                 MsUsed: timer.ElapsedMilliseconds.ToString(),
                 ReturnValue: statusCode,
-                RequestBody: requestBody,
+                RequestBody: RedactSensitiveRequestBody(requestBody),
                 ReturnBody: returnBody,
                 ExecString: execString,
                 Jwt: jwt,
@@ -702,7 +723,10 @@ public sealed class SqlWebApiExecutor(
 
             sqlExec.Append(parameter.ParameterName);
             sqlExec.Append("='");
-            sqlExec.Append(parameter.Value.ToString()?.Replace("'", "''", StringComparison.Ordinal) ?? string.Empty);
+            var parameterValue = RedactSensitiveParameterValue(
+                parameter.ParameterName,
+                parameter.Value.ToString() ?? string.Empty);
+            sqlExec.Append(parameterValue.Replace("'", "''", StringComparison.Ordinal));
             sqlExec.Append("',");
         }
 
@@ -712,6 +736,79 @@ public sealed class SqlWebApiExecutor(
         }
 
         return sqlExec.ToString();
+    }
+
+    private static string RedactSensitiveRequestBody(string requestBody)
+    {
+        if (string.IsNullOrWhiteSpace(requestBody))
+        {
+            return requestBody;
+        }
+
+        try
+        {
+            var root = JsonNode.Parse(requestBody);
+            if (root is null)
+            {
+                return requestBody;
+            }
+
+            RedactSensitiveJsonNode(root);
+            return root.ToJsonString(LogJsonSerializerOptions);
+        }
+        catch (JsonException)
+        {
+            return requestBody;
+        }
+    }
+
+    private static string RedactSensitiveParameterValue(string parameterName, string parameterValue)
+    {
+        if (IsSensitiveName(parameterName))
+        {
+            return RedactedValue;
+        }
+
+        return RedactSensitiveRequestBody(parameterValue);
+    }
+
+    private static void RedactSensitiveJsonNode(JsonNode node)
+    {
+        if (node is JsonObject jsonObject)
+        {
+            foreach (var property in jsonObject.ToArray())
+            {
+                if (IsSensitiveName(property.Key))
+                {
+                    jsonObject[property.Key] = RedactedValue;
+                    continue;
+                }
+
+                if (property.Value is not null)
+                {
+                    RedactSensitiveJsonNode(property.Value);
+                }
+            }
+
+            return;
+        }
+
+        if (node is JsonArray jsonArray)
+        {
+            foreach (var child in jsonArray)
+            {
+                if (child is not null)
+                {
+                    RedactSensitiveJsonNode(child);
+                }
+            }
+        }
+    }
+
+    private static bool IsSensitiveName(string name)
+    {
+        var normalizedName = name.TrimStart('@').Replace("-", "_", StringComparison.Ordinal).ToLowerInvariant();
+        return SensitiveParameterNameFragments.Any(fragment => normalizedName.Contains(fragment, StringComparison.Ordinal));
     }
 
     private static (string? JsonData, int? TotalRows) BuildOutputPayload(SqlCommand command, string? jsonData, int? totalRows)

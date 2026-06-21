@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using Microsoft.IdentityModel.Tokens;
+using UpApi.Configuration;
 
 namespace UpApi.Services;
 
@@ -181,13 +182,13 @@ internal static class JwtHelper
             var configuredValue = configuration[key];
             if (!string.IsNullOrWhiteSpace(configuredValue))
             {
-                return configuredValue;
+                return SecretResolver.Default.Resolve(configuredValue);
             }
 
             var environmentValue = Environment.GetEnvironmentVariable(key);
             if (!string.IsNullOrWhiteSpace(environmentValue))
             {
-                return environmentValue;
+                return SecretResolver.Default.Resolve(environmentValue);
             }
         }
 

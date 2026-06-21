@@ -6,7 +6,8 @@ namespace UpApi.Services;
 
 public sealed class ConfigurationHealthCheck(
     IOptions<ServiceConfigurations> serviceConfigurations,
-    IConfiguration configuration) : IHealthCheck
+    IConfiguration configuration,
+    ISecretResolver secretResolver) : IHealthCheck
 {
     public Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext context,
@@ -37,7 +38,7 @@ public sealed class ConfigurationHealthCheck(
             "JWT_ISSUER",
             "JWT_AUDIENCE"
         }
-        .Where(key => string.IsNullOrWhiteSpace(GetSetting(configuration, key)))
+        .Where(key => string.IsNullOrWhiteSpace(GetSetting(configuration, secretResolver, key)))
         .ToArray();
 
         var data = new Dictionary<string, object>
@@ -67,8 +68,9 @@ public sealed class ConfigurationHealthCheck(
             data));
     }
 
-    private static string? GetSetting(IConfiguration configuration, string key)
+    private static string? GetSetting(IConfiguration configuration, ISecretResolver secretResolver, string key)
     {
-        return configuration[key] ?? Environment.GetEnvironmentVariable(key);
+        var value = configuration[key] ?? Environment.GetEnvironmentVariable(key);
+        return value is null ? null : secretResolver.Resolve(value);
     }
 }

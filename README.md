@@ -139,7 +139,23 @@ Recommended:
 
 - keep real secrets out of source control
 - use environment variables in production
+- use `{{secret:name}}` placeholders for values supplied by Docker Secrets
 - keep one SQL schema per API service
+
+Secret placeholders can be used inside configuration values that contain secrets, for example:
+
+```json
+{
+  "Services": {
+    "api": {
+      "SqlConnectionString": "Server=localhost,1433;Initial Catalog=MyDb;User ID=upservice;Password={{secret:upapi_sql_password}};Encrypt=False;TrustServerCertificate=True;"
+    }
+  },
+  "JWT_SECRET": "{{secret:upapi_jwt_secret}}"
+}
+```
+
+At runtime, `{{secret:upapi_sql_password}}` is resolved from either an environment variable named `upapi_sql_password` or `UPAPI_SQL_PASSWORD`, or from a Docker Secret file at `/run/secrets/upapi_sql_password`. Set `UPAPI_SECRETS_DIRECTORY` to use a different secrets directory.
 
 ### CORS configuration
 
@@ -247,10 +263,13 @@ Read log entries with `GET /SqlLog`. All query parameters are optional:
 - `OnlySqlError=true`: include entries with `ReturnValue >= 500`
 - `UserError=true`: include entries with `ReturnValue >= 400` and `< 500`
 - `Today=true`: include entries since SQL Server midnight
+- `procedure`: include entries where `ExecString` starts with `exec {procedure}`
 - `FromRow`: zero-based first row to return; defaults to `0`
 - `ToRow`: zero-based last row to return, inclusive; defaults to `100`
+- `sortBy`: `time`, `service`, `status`, `duration`, `server`, or `sqlExecution`; defaults to `time`
+- `sortDirection`: `asc` or `desc`; defaults to `desc`
 
-Rows are returned newest first. If both error flags are `true`, all entries with
+Rows are returned newest first by default. If both error flags are `true`, all entries with
 `ReturnValue >= 400` are returned.
 
 Open `/sql-log-view` for a browser-based query and paging interface. It displays

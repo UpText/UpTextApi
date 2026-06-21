@@ -9,6 +9,7 @@ using System.Text.Json.Nodes;
 
 var builder = WebApplication.CreateBuilder(args);
 var isDevelopment = builder.Environment.IsDevelopment();
+var secretResolver = SecretResolver.Default;
 
 // Add services to the container.
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
@@ -76,12 +77,19 @@ builder.Services.AddCors(options =>
             .WithExposedHeaders("Content-Range");
     });
 });
+builder.Services.AddSingleton<ISecretResolver>(secretResolver);
 builder.Services.Configure<ServiceConfigurations>(options =>
-    builder.Configuration.GetSection(ServiceConfigurations.SectionName).Bind(options.Services));
+{
+    builder.Configuration.GetSection(ServiceConfigurations.SectionName).Bind(options.Services);
+    foreach (var service in options.Services.Values)
+    {
+        service.SqlConnectionString = secretResolver.Resolve(service.SqlConnectionString).Trim();
+    }
+});
 builder.Services.Configure<SqlLogOptions>(options =>
 {
     builder.Configuration.GetSection(SqlLogOptions.SectionName).Bind(options);
-    options.ConnectionString = options.ConnectionString.Trim();
+    options.ConnectionString = secretResolver.Resolve(options.ConnectionString).Trim();
 });
 builder.Services.AddSingleton<IServiceConfigResolver, ServiceConfigResolver>();
 builder.Services.AddSingleton<ISqlWebApiExecutor, SqlWebApiExecutor>();
