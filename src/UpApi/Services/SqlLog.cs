@@ -189,8 +189,11 @@ SELECT @TotalDeleted;
         bool? onlySqlError,
         bool? userError,
         bool? today,
+        string? procedure,
         int fromRow,
         int toRow,
+        SqlLogSortColumn sortColumn,
+        SqlLogSortDirection sortDirection,
         CancellationToken cancellationToken = default)
     {
         if (!TryGetValidatedIdentifiers(out var schema, out var tableName))
@@ -220,6 +223,11 @@ SELECT @TotalDeleted;
             filters.Add("[TimeStamp] >= CONVERT(date, GETDATE())");
         }
 
+        if (!string.IsNullOrWhiteSpace(procedure))
+        {
+            filters.Add("([ExecString] LIKE @ProcedureExecution ESCAPE '~' OR [ExecString] LIKE @SchemaProcedureExecution ESCAPE '~')");
+        }
+
         if (onlySqlError == true && userError == true)
         {
             filters.Add("[ReturnValue] >= 400");
@@ -236,6 +244,20 @@ SELECT @TotalDeleted;
         var whereClause = filters.Count == 0
             ? string.Empty
             : $"WHERE {string.Join(" AND ", filters)}";
+        var orderByColumn = sortColumn switch
+        {
+            SqlLogSortColumn.Time => "[TimeStamp]",
+            SqlLogSortColumn.Service => "[ApiName]",
+            SqlLogSortColumn.Status => "[ReturnValue]",
+            SqlLogSortColumn.Duration => "[MsUsed]",
+            SqlLogSortColumn.Server => "[SwaServer]",
+            SqlLogSortColumn.SqlExecution => "[ExecString]",
+            _ => throw new ArgumentOutOfRangeException(nameof(sortColumn))
+        };
+        var orderByDirection = sortDirection == SqlLogSortDirection.Asc ? "ASC" : "DESC";
+        var orderByClause = sortColumn == SqlLogSortColumn.Time
+            ? $"{orderByColumn} {orderByDirection}, [Id] {orderByDirection}"
+            : $"{orderByColumn} {orderByDirection}, [TimeStamp] DESC, [Id] DESC";
         var sqlSelect = $"""
 SELECT
     [Id],
@@ -251,7 +273,7 @@ SELECT
     [UnexpectedError]
 FROM [{schema}].[{tableName}]
 {whereClause}
-ORDER BY [TimeStamp] DESC, [Id] DESC
+ORDER BY {orderByClause}
 OFFSET @FromRow ROWS
 FETCH NEXT @RowCount ROWS ONLY;
 """;
@@ -274,6 +296,13 @@ FETCH NEXT @RowCount ROWS ONLY;
         if (aboveTime.HasValue)
         {
             command.Parameters.Add(new SqlParameter("@AboveTime", SqlDbType.Int) { Value = aboveTime.Value });
+        }
+
+        if (!string.IsNullOrWhiteSpace(procedure))
+        {
+            var procedureSearch = EscapeLikeValue(procedure.Trim());
+            command.Parameters.Add(new SqlParameter("@ProcedureExecution", SqlDbType.NVarChar, -1) { Value = $"EXEC {procedureSearch}%" });
+            command.Parameters.Add(new SqlParameter("@SchemaProcedureExecution", SqlDbType.NVarChar, -1) { Value = $"EXEC %.%{procedureSearch}%" });
         }
 
         command.Parameters.Add(new SqlParameter("@FromRow", SqlDbType.Int) { Value = fromRow });
@@ -415,6 +444,13 @@ WHERE [ApiName] = @Service;
 
     private static object ToDbValue(string? value)
         => string.IsNullOrWhiteSpace(value) ? DBNull.Value : value;
+
+    private static string EscapeLikeValue(string value)
+        => value
+            .Replace("~", "~~", StringComparison.Ordinal)
+            .Replace("%", "~%", StringComparison.Ordinal)
+            .Replace("_", "~_", StringComparison.Ordinal)
+            .Replace("[", "~[", StringComparison.Ordinal);
 
     private static string? GetNullableString(SqlDataReader reader, int ordinal)
         => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);

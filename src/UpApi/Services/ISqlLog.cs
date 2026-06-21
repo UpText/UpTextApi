@@ -18,7 +18,10 @@ public interface ISqlLog
         bool? onlySqlError,
         bool? userError,
         bool? today,
+        string? procedure,
         int fromRow,
         int toRow,
+        SqlLogSortColumn sortColumn,
+        SqlLogSortDirection sortDirection,
         CancellationToken cancellationToken = default);
 }

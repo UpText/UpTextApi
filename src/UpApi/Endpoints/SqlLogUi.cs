@@ -187,6 +187,24 @@ public static class SqlLogUi
       text-transform: uppercase;
       background: #f8fafc;
     }
+    .sort-button {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0;
+      border: 0;
+      color: inherit;
+      font: inherit;
+      letter-spacing: inherit;
+      text-transform: inherit;
+      background: transparent;
+      cursor: pointer;
+    }
+    .sort-button:hover, .sort-button:focus-visible { color: var(--teal); }
+    .sort-button:focus-visible { outline: 2px solid #0891b2; outline-offset: 3px; border-radius: 2px; }
+    .sort-indicator { width: 10px; color: #94a3b8; font-size: 12px; }
+    th[aria-sort="ascending"] .sort-indicator,
+    th[aria-sort="descending"] .sort-indicator { color: var(--teal); }
     td {
       max-width: 300px;
       padding: 12px 14px;
@@ -204,19 +222,66 @@ public static class SqlLogUi
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .sql-cell { width: 620px; max-width: none; }
-    .sql-value { width: 100%; min-width: 0; max-width: 100%; }
-    .sql-text {
+    .payload-cell { cursor: default; }
+    .payload-button {
       display: block;
       width: 100%;
       max-width: 100%;
-      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      border: 0;
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      background: transparent;
+      cursor: pointer;
+    }
+    .payload-button:hover,
+    .payload-button:focus-visible { color: var(--teal); text-decoration: underline; }
+    .payload-button:focus-visible { outline: 2px solid #0891b2; outline-offset: 3px; border-radius: 2px; }
+    .sql-cell { width: 740px; max-width: none; padding-block: 8px; }
+    .sql-value {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 2px 8px;
+      width: 100%;
+      min-width: 0;
+      max-width: 100%;
+      color: #1e293b;
+      font: 11px/1.3 "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    }
+    .sql-command,
+    .sql-params {
+      display: block;
       overflow-wrap: anywhere;
       word-break: break-word;
-      color: #1e293b;
-      font: 12px/1.55 "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-      white-space: pre-wrap;
+      white-space: normal;
     }
+    .sql-command { font-weight: 700; color: #0f172a; }
+    .sql-params {
+      grid-column: 1 / -1;
+      color: #475569;
+      line-height: 1.25;
+    }
+    .copy-sql-button {
+      display: inline-grid;
+      place-items: center;
+      width: 20px;
+      height: 20px;
+      padding: 0;
+      border: 1px solid #cbd5e1;
+      border-radius: 5px;
+      color: #475569;
+      background: #fff;
+      cursor: pointer;
+    }
+    .copy-sql-button:hover,
+    .copy-sql-button:focus-visible { border-color: #0891b2; color: var(--teal); }
+    .copy-sql-button:focus-visible { outline: 2px solid #0891b2; outline-offset: 2px; }
+    .copy-sql-button.copied { border-color: #0f766e; color: #0f766e; background: #ecfdf5; }
+    .copy-sql-button svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; }
     .status {
       display: inline-flex;
       min-width: 48px;
@@ -259,6 +324,68 @@ public static class SqlLogUi
     }
     .pager-button:hover:not(:disabled) { border-color: #0891b2; color: var(--teal); }
     .pager-button:disabled { cursor: default; opacity: 0.45; }
+    .modal-backdrop {
+      position: fixed;
+      z-index: 10;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 18px;
+      background: rgba(15, 23, 42, 0.54);
+    }
+    .modal-backdrop[hidden] { display: none; }
+    .payload-dialog {
+      width: min(980px, 100%);
+      max-height: min(780px, calc(100vh - 36px));
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      overflow: hidden;
+      border: 1px solid rgba(219, 228, 238, 0.95);
+      border-radius: 18px;
+      background: #fff;
+      box-shadow: 0 24px 70px -28px rgba(15, 23, 42, 0.72);
+    }
+    .payload-dialog-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      background: #f8fafc;
+    }
+    .payload-dialog-title {
+      margin: 0;
+      font-family: "Space Grotesk", sans-serif;
+      font-size: 18px;
+      line-height: 1.2;
+    }
+    .payload-dialog-actions { display: flex; align-items: center; gap: 8px; }
+    .payload-action {
+      min-height: 34px;
+      padding: 0 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 9px;
+      color: #334155;
+      font-size: 13px;
+      font-weight: 700;
+      background: #fff;
+      cursor: pointer;
+    }
+    .payload-action:hover,
+    .payload-action:focus-visible { border-color: #0891b2; color: var(--teal); }
+    .payload-action:focus-visible { outline: 2px solid #0891b2; outline-offset: 2px; }
+    .payload-pre {
+      min-height: 260px;
+      margin: 0;
+      padding: 18px;
+      overflow: auto;
+      color: #0f172a;
+      font: 12px/1.6 "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #fbfdff;
+    }
     @media (max-width: 1050px) {
       .filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .button-primary { width: 100%; }
@@ -300,8 +427,8 @@ public static class SqlLogUi
 
       <form class="filters" id="filters">
         <div class="field">
-          <label for="service">Service</label>
-          <input id="service" name="service" type="text" placeholder="All services" />
+          <label for="procedure">Procedure search</label>
+          <input id="procedure" name="procedure" type="text" placeholder="Procedure name" />
         </div>
         <div class="field">
           <label for="max-hours">Max hours</label>
@@ -320,29 +447,27 @@ public static class SqlLogUi
       <div class="table-wrap">
         <table>
           <colgroup>
-            <col style="width: 190px" />
-            <col style="width: 120px" />
+            <col style="width: 135px" />
             <col style="width: 90px" />
             <col style="width: 100px" />
-            <col style="width: 140px" />
-            <col style="width: 620px" />
-            <col style="width: 220px" />
+            <col style="width: 740px" />
             <col style="width: 280px" />
+            <col style="width: 220px" />
+            <col style="width: 140px" />
           </colgroup>
           <thead>
             <tr>
-              <th>Time</th>
-              <th>Service</th>
-              <th>Status</th>
-              <th>Duration</th>
-              <th>Server</th>
-              <th>SQL execution</th>
-              <th>Request</th>
+              <th data-sort="time"><button class="sort-button" type="button">Time <span class="sort-indicator" aria-hidden="true"></span></button></th>
+              <th data-sort="status"><button class="sort-button" type="button">Status <span class="sort-indicator" aria-hidden="true"></span></button></th>
+              <th data-sort="duration"><button class="sort-button" type="button">Duration <span class="sort-indicator" aria-hidden="true"></span></button></th>
+              <th data-sort="sqlExecution"><button class="sort-button" type="button">SQL execution <span class="sort-indicator" aria-hidden="true"></span></button></th>
               <th>Response / error</th>
+              <th>Request</th>
+              <th data-sort="server"><button class="sort-button" type="button">Server <span class="sort-indicator" aria-hidden="true"></span></button></th>
             </tr>
           </thead>
           <tbody id="rows">
-            <tr><td class="empty" colspan="8">Loading SQL log entries...</td></tr>
+            <tr><td class="empty" colspan="7">Loading SQL log entries...</td></tr>
           </tbody>
         </table>
       </div>
@@ -357,11 +482,27 @@ public static class SqlLogUi
     </section>
   </main>
 
+  <div class="modal-backdrop" id="payload-modal" hidden>
+    <section class="payload-dialog" role="dialog" aria-modal="true" aria-labelledby="payload-title">
+      <header class="payload-dialog-header">
+        <h2 class="payload-dialog-title" id="payload-title">Payload</h2>
+        <div class="payload-dialog-actions">
+          <button class="payload-action" id="copy-payload" type="button">Copy</button>
+          <button class="payload-action" id="close-payload" type="button">Close</button>
+        </div>
+      </header>
+      <pre class="payload-pre" id="payload-content"></pre>
+    </section>
+  </div>
+
   <script>
     const apiUrl = {{apiUrlJson}};
     const pageSize = 20;
     let fromRow = 0;
     let currentCount = 0;
+    let sortBy = "time";
+    let sortDirection = "desc";
+    let service = "";
 
     const form = document.getElementById("filters");
     const rowsElement = document.getElementById("rows");
@@ -370,10 +511,18 @@ public static class SqlLogUi
     const queryButton = document.getElementById("query");
     const previousButton = document.getElementById("previous");
     const nextButton = document.getElementById("next");
+    const sortHeaders = document.querySelectorAll("th[data-sort]");
+    const payloadModal = document.getElementById("payload-modal");
+    const payloadTitle = document.getElementById("payload-title");
+    const payloadContent = document.getElementById("payload-content");
+    const closePayloadButton = document.getElementById("close-payload");
+    const copyPayloadButton = document.getElementById("copy-payload");
+    let activePayloadText = "";
 
     function applyUrlParameters() {
       const params = new URLSearchParams(window.location.search);
-      document.getElementById("service").value = params.get("service") || "";
+      service = params.get("service") || "";
+      document.getElementById("procedure").value = params.get("procedure") || "";
       document.getElementById("max-hours").value = params.get("maxHours") || "";
       document.getElementById("above-time").value = params.get("aboveTime") || "";
       document.getElementById("sql-error").checked = params.get("OnlySqlError") === "true";
@@ -384,6 +533,16 @@ public static class SqlLogUi
       fromRow = Number.isInteger(requestedFromRow) && requestedFromRow >= 0
         ? requestedFromRow
         : 0;
+
+      const requestedSortBy = params.get("sortBy");
+      if ([...sortHeaders].some(header => header.dataset.sort === requestedSortBy)) {
+        sortBy = requestedSortBy;
+      }
+
+      const requestedSortDirection = params.get("sortDirection");
+      if (requestedSortDirection === "asc" || requestedSortDirection === "desc") {
+        sortDirection = requestedSortDirection;
+      }
     }
 
     function appendValue(params, name, elementId) {
@@ -393,15 +552,29 @@ public static class SqlLogUi
 
     function buildQuery() {
       const params = new URLSearchParams();
-      appendValue(params, "service", "service");
+      if (service.trim() !== "") params.set("service", service.trim());
+      appendValue(params, "procedure", "procedure");
       appendValue(params, "maxHours", "max-hours");
       appendValue(params, "aboveTime", "above-time");
       if (document.getElementById("sql-error").checked) params.set("OnlySqlError", "true");
       if (document.getElementById("user-error").checked) params.set("UserError", "true");
       if (document.getElementById("today").checked) params.set("Today", "true");
+      params.set("sortBy", sortBy);
+      params.set("sortDirection", sortDirection);
       params.set("FromRow", fromRow.toString());
       params.set("ToRow", (fromRow + pageSize - 1).toString());
       return params;
+    }
+
+    function updateSortHeaders() {
+      for (const header of sortHeaders) {
+        const active = header.dataset.sort === sortBy;
+        const indicator = header.querySelector(".sort-indicator");
+        header.setAttribute("aria-sort", active
+          ? (sortDirection === "asc" ? "ascending" : "descending")
+          : "none");
+        indicator.textContent = active ? (sortDirection === "asc" ? "↑" : "↓") : "";
+      }
     }
 
     function cell(row, className, text, title) {
@@ -428,17 +601,131 @@ public static class SqlLogUi
     function sqlExecutionCell(row, value) {
       const td = document.createElement("td");
       const container = document.createElement("div");
-      const sql = document.createElement("pre");
-      const text = value || "";
+      const command = document.createElement("span");
+      const params = document.createElement("span");
+      const copyButton = document.createElement("button");
+      const parts = splitSqlExecution(value);
 
       td.className = "sql-cell";
       container.className = "sql-value";
-      sql.className = "sql-text";
-      sql.textContent = text;
-      container.appendChild(sql);
+      command.className = "sql-command";
+      command.textContent = parts.command;
+      copyButton.className = "copy-sql-button";
+      copyButton.type = "button";
+      copyButton.title = "Copy SQL execution";
+      copyButton.setAttribute("aria-label", "Copy SQL execution");
+      copyButton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+      copyButton.addEventListener("click", () => copySqlExecution(copyButton, parts.fullText));
+      params.className = "sql-params";
+      params.textContent = parts.parameters;
+      if (parts.fullText) container.title = parts.fullText;
+      if (parts.fullText) container.appendChild(copyButton);
+      container.appendChild(command);
+      if (parts.parameters !== "") container.appendChild(params);
 
       td.appendChild(container);
       row.appendChild(td);
+    }
+
+    function splitSqlExecution(value) {
+      const fullText = (value || "").replace(/\s+/g, " ").trim();
+      const match = fullText.match(/^(EXEC\s+\S+)\s+(.+)$/i);
+      if (!match) return { command: fullText, parameters: "", fullText };
+      return {
+        command: match[1],
+        parameters: match[2].replace(/,\s*/g, ", "),
+        fullText
+      };
+    }
+
+    async function copySqlExecution(button, text) {
+      if (text === "") return;
+
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.setAttribute("readonly", "");
+        textarea.style.position = "fixed";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        textarea.remove();
+      }
+
+      button.classList.add("copied");
+      window.setTimeout(() => button.classList.remove("copied"), 900);
+    }
+
+    function formatPayload(value) {
+      const text = value || "";
+      const trimmed = text.trim();
+      if (trimmed === "") return "";
+
+      if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+        return text;
+      }
+
+      try {
+        return JSON.stringify(JSON.parse(trimmed), null, 2);
+      } catch {
+        return text;
+      }
+    }
+
+    function openPayloadModal(title, value) {
+      activePayloadText = formatPayload(value);
+      payloadTitle.textContent = title;
+      payloadContent.textContent = activePayloadText;
+      payloadModal.hidden = false;
+      closePayloadButton.focus();
+    }
+
+    function closePayloadModal() {
+      payloadModal.hidden = true;
+      activePayloadText = "";
+      payloadContent.textContent = "";
+    }
+
+    function payloadCell(row, label, value) {
+      const td = document.createElement("td");
+      const text = value || "";
+      td.className = "mono payload-cell";
+
+      if (text === "") {
+        const span = document.createElement("span");
+        span.className = "clip";
+        span.textContent = "";
+        td.appendChild(span);
+      } else {
+        const button = document.createElement("button");
+        button.className = "payload-button";
+        button.type = "button";
+        button.textContent = text;
+        button.title = `Open ${label.toLowerCase()} payload`;
+        button.addEventListener("click", () => openPayloadModal(label, text));
+        td.appendChild(button);
+      }
+
+      row.appendChild(td);
+    }
+
+    function formatTimestamp(value) {
+      if (!value) return "";
+
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "";
+
+      return date.toLocaleString(undefined, {
+        day: "2-digit",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false
+      });
     }
 
     function renderRows(rows) {
@@ -448,7 +735,7 @@ public static class SqlLogUi
         const row = document.createElement("tr");
         const td = document.createElement("td");
         td.className = "empty";
-        td.colSpan = 8;
+        td.colSpan = 7;
         td.textContent = "No log entries matched these filters.";
         row.appendChild(td);
         rowsElement.appendChild(row);
@@ -457,16 +744,15 @@ public static class SqlLogUi
 
       for (const item of rows) {
         const row = document.createElement("tr");
-        const timestamp = item.timeStamp ? new Date(item.timeStamp).toLocaleString() : "";
+        const timestamp = formatTimestamp(item.timeStamp);
         const response = item.unexpectedError || item.returnBody || "";
         cell(row, "", timestamp, item.timeStamp);
-        cell(row, "", item.apiName || "", item.apiName);
         statusCell(row, item.returnValue);
         cell(row, "mono", item.msUsed == null ? "" : item.msUsed + " ms");
-        cell(row, "", item.swaServer || "", item.swaServer);
         sqlExecutionCell(row, item.execString);
-        cell(row, "mono", item.requestBody || "", item.requestBody);
-        cell(row, "mono", response, response);
+        payloadCell(row, item.unexpectedError ? "Response / error" : "Response", response);
+        payloadCell(row, "Request", item.requestBody || "");
+        cell(row, "", item.swaServer || "", item.swaServer);
         rowsElement.appendChild(row);
       }
     }
@@ -496,7 +782,7 @@ public static class SqlLogUi
         summaryElement.innerHTML = `<strong>${rows.length}</strong> row${rows.length === 1 ? "" : "s"} on this page`;
       } catch (error) {
         currentCount = 0;
-        rowsElement.innerHTML = '<tr><td class="empty error" colspan="8"></td></tr>';
+        rowsElement.innerHTML = '<tr><td class="empty error" colspan="7"></td></tr>';
         rowsElement.querySelector("td").textContent = error instanceof Error ? error.message : "Unable to load SQL log entries.";
         summaryElement.textContent = "Query failed";
       } finally {
@@ -521,7 +807,31 @@ public static class SqlLogUi
       loadRows();
     });
 
+    closePayloadButton.addEventListener("click", closePayloadModal);
+    payloadModal.addEventListener("click", event => {
+      if (event.target === payloadModal) closePayloadModal();
+    });
+    copyPayloadButton.addEventListener("click", async () => {
+      if (!navigator.clipboard || activePayloadText === "") return;
+      await navigator.clipboard.writeText(activePayloadText);
+    });
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape" && !payloadModal.hidden) closePayloadModal();
+    });
+
+    for (const header of sortHeaders) {
+      header.querySelector("button").addEventListener("click", () => {
+        const selectedSort = header.dataset.sort;
+        sortDirection = sortBy === selectedSort && sortDirection === "asc" ? "desc" : "asc";
+        sortBy = selectedSort;
+        fromRow = 0;
+        updateSortHeaders();
+        loadRows();
+      });
+    }
+
     applyUrlParameters();
+    updateSortHeaders();
     loadRows();
   </script>
 </body>
