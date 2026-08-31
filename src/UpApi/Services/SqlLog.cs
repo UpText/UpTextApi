@@ -406,6 +406,76 @@ WHERE [ApiName] = @Service;
             SqlErrors: reader.GetInt64(8));
     }
 
+    public async Task<SqlProcedureSource?> ReadProcedureSourceAsync(
+        string procedure,
+        string? connectionString = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(procedure))
+        {
+            throw new ArgumentException("Procedure is required.", nameof(procedure));
+        }
+
+        if (!TryGetValidatedIdentifiers(out _, out _))
+        {
+            throw new InvalidOperationException("SqlLog is not configured.");
+        }
+
+        var procedureName = NormalizeProcedureName(procedure);
+        if (procedureName.Length == 0)
+        {
+            throw new ArgumentException("Procedure is required.", nameof(procedure));
+        }
+
+        const string sqlSelect = """
+DECLARE @ProcedureName nvarchar(776) = @Procedure;
+DECLARE @ObjectId int = OBJECT_ID(@ProcedureName, 'P');
+DECLARE @ProcedureOnly sysname = PARSENAME(@ProcedureName, 1);
+DECLARE @SchemaName sysname = PARSENAME(@ProcedureName, 2);
+
+IF @ObjectId IS NULL AND @ProcedureOnly IS NOT NULL
+BEGIN
+    SELECT TOP (1) @ObjectId = [object_id]
+    FROM sys.procedures
+    WHERE [name] = @ProcedureOnly
+        AND (@SchemaName IS NULL OR SCHEMA_NAME([schema_id]) = @SchemaName)
+    ORDER BY [schema_id], [object_id];
+END;
+
+SELECT
+    QUOTENAME(SCHEMA_NAME([procedure].[schema_id])) + N'.' + QUOTENAME([procedure].[name]) AS [ProcedureName],
+    [module].[definition]
+FROM sys.procedures AS [procedure]
+INNER JOIN sys.sql_modules AS [module]
+    ON [module].[object_id] = [procedure].[object_id]
+WHERE [procedure].[object_id] = @ObjectId;
+""";
+
+        await using var connection = new SqlConnection(string.IsNullOrWhiteSpace(connectionString)
+            ? sqlLogOptions.ConnectionString
+            : connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = new SqlCommand(sqlSelect, connection);
+        command.Parameters.Add(new SqlParameter("@Procedure", SqlDbType.NVarChar, 776) { Value = procedureName });
+
+        await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SingleRow, cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        if (reader.IsDBNull(1) || string.IsNullOrWhiteSpace(reader.GetString(1)))
+        {
+            throw new UnauthorizedAccessException(
+                "Stored procedure source is not visible. Grant VIEW DEFINITION on the procedure or schema, or check whether the procedure is encrypted.");
+        }
+
+        return new SqlProcedureSource(
+            ProcedureName: reader.GetString(0),
+            Definition: reader.GetString(1));
+    }
+
     private bool TryGetValidatedIdentifiers(
         [NotNullWhen(true)] out string? schema,
         [NotNullWhen(true)] out string? tableName)
@@ -444,6 +514,17 @@ WHERE [ApiName] = @Service;
 
     private static object ToDbValue(string? value)
         => string.IsNullOrWhiteSpace(value) ? DBNull.Value : value;
+
+    private static string NormalizeProcedureName(string value)
+    {
+        var trimmed = value.Trim();
+        while (trimmed.EndsWith(';'))
+        {
+            trimmed = trimmed[..^1].TrimEnd();
+        }
+
+        return trimmed;
+    }
 
     private static string EscapeLikeValue(string value)
         => value

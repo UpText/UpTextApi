@@ -12,17 +12,24 @@ public static class ServiceLogStatus
             .WithSummary("Return SQL log totals for a service")
             .Produces<ServiceLogStatusResult>(StatusCodes.Status200OK, "application/json")
             .Produces(StatusCodes.Status400BadRequest, contentType: "text/plain")
+            .Produces(StatusCodes.Status503ServiceUnavailable, contentType: "text/plain")
             .Produces(StatusCodes.Status500InternalServerError, contentType: "text/plain");
 
         return app;
     }
 
     private static async Task<IResult> HandleAsync(
+        HttpRequest request,
         string? service,
         ISqlLog sqlLog,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
+        if (!HomeProtection.IsAuthorized(request))
+        {
+            return HomeProtection.Unauthorized();
+        }
+
         if (string.IsNullOrWhiteSpace(service))
         {
             return Results.Text("service is required.", "text/plain", statusCode: StatusCodes.Status400BadRequest);
@@ -32,6 +39,13 @@ public static class ServiceLogStatus
         {
             var status = await sqlLog.ReadServiceStatusAsync(service, cancellationToken);
             return Results.Json(status);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Equals("SqlLog is not configured.", StringComparison.Ordinal))
+        {
+            return Results.Text(
+                "SQL log is not configured.",
+                "text/plain",
+                statusCode: StatusCodes.Status503ServiceUnavailable);
         }
         catch (Exception ex)
         {

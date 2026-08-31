@@ -10,10 +10,16 @@ public static class SqlGeneratorUi
     public static IEndpointRouteBuilder MapSqlGeneratorUi(this IEndpointRouteBuilder app)
     {
         app.MapGet("/sql-generator/{service}/{tableSchema}", (
+                HttpRequest request,
                 string service,
                 string tableSchema,
                 IOptions<ServiceConfigurations> serviceConfigurations) =>
             {
+                if (!HomeProtection.IsAuthorized(request))
+                {
+                    return HomeProtection.Unauthorized();
+                }
+
                 if (!serviceConfigurations.Value.Services.TryGetValue(service, out var config))
                 {
                     return Results.NotFound();
@@ -49,6 +55,7 @@ public static class SqlGeneratorUi
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <title>SQL Generator - {{encodedService}}</title>
   <style>
     :root {
@@ -247,6 +254,8 @@ public static class SqlGeneratorUi
             'Sort': document.getElementById('sort').checked,
             'Search': document.getElementById('search').checked
           });
+          const homeKey = new URLSearchParams(window.location.search).get('homeKey');
+          if (homeKey) query.set('homeKey', homeKey);
           const response = await fetch(`/${encodeURIComponent(service)}/sql-generator?${query}`);
           const text = await response.text();
           if (!response.ok) {

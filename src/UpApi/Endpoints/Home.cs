@@ -6,9 +6,6 @@ namespace UpApi.Endpoints;
 
 public static class Home
 {
-    private const string BrandPrimary = "#082f49";
-    private const string BrandCyan = "#67e8f9";
-    private const string BrandAmber = "#f59e0b";
     private const string BrandInk = "#0f172a";
     private const string BrandMuted = "#475569";
     private const string BrandTeal = "#0f766e";
@@ -17,6 +14,17 @@ public static class Home
     {
         app.MapGet("/", (IConfiguration configuration, IOptions<ServiceConfigurations> serviceConfigurations) =>
                 Results.Content(RenderHomePage(configuration, serviceConfigurations.Value), "text/html; charset=utf-8"))
+            .ExcludeFromDescription();
+
+        app.MapGet("/home-key", (HttpRequest request) =>
+            {
+                if (!HomeProtection.IsAuthorized(request))
+                {
+                    return HomeProtection.Unauthorized();
+                }
+
+                return Results.NoContent();
+            })
             .ExcludeFromDescription();
 
         return app;
@@ -29,19 +37,22 @@ public static class Home
             ? string.Join(
                 "\n",
                 swaggerServices.Select(service =>
-                    $"      <a class=\"service-link\" href=\"/docs/{Uri.EscapeDataString(service)}\">Swagger UI for {WebUtility.HtmlEncode(service)}</a>"))
+                    $"      <a class=\"service-link protected-link\" data-href=\"/docs/{Uri.EscapeDataString(service)}\" href=\"/docs/{Uri.EscapeDataString(service)}\">Swagger UI for {WebUtility.HtmlEncode(service)}</a>"))
             : "      <div class=\"service-link empty-state\">No Swagger services configured yet.</div>";
         var sqlGenerators = GetSqlGenerators(serviceConfigurations);
         var sqlGeneratorLinks = sqlGenerators.Count > 0
             ? string.Join(
                 "\n",
                 sqlGenerators.Select(generator =>
-                    $"      <a class=\"service-link\" href=\"/sql-generator/{Uri.EscapeDataString(generator.Service)}/{Uri.EscapeDataString(generator.TableSchema)}\">SQL Generator for {WebUtility.HtmlEncode(generator.Service)}</a>"))
+                    $"      <a class=\"service-link protected-link\" data-href=\"/sql-generator/{Uri.EscapeDataString(generator.Service)}/{Uri.EscapeDataString(generator.TableSchema)}\" href=\"/sql-generator/{Uri.EscapeDataString(generator.Service)}/{Uri.EscapeDataString(generator.TableSchema)}\">SQL Generator for {WebUtility.HtmlEncode(generator.Service)}</a>"))
             : "      <div class=\"service-link empty-state\">No SQL generators enabled.</div>";
         var sqlLogServices = GetSqlLogServices(serviceConfigurations);
         var sqlLogCards = sqlLogServices.Count > 0
             ? string.Join("\n", sqlLogServices.Select(RenderSqlLogCard))
             : "      <div class=\"service-link empty-state\">No services configured yet.</div>";
+        var homeKeyStatus = HomeProtection.IsConfigured(configuration)
+            ? "HomeKey required for docs, SQL generator, and SQL log."
+            : "No HomeKey configured; docs, SQL generator, and SQL log are currently open.";
 
         return string.Join(
             "\n",
@@ -53,7 +64,7 @@ public static class Home
             "  <link rel=\"preconnect\" href=\"https://fonts.googleapis.com\" />",
             "  <link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin />",
             "  <link href=\"https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;700&display=swap\" rel=\"stylesheet\" />",
-            $"  <link rel=\"icon\" href=\"data:image/svg+xml,{Uri.EscapeDataString(RenderFaviconSvg())}\" />",
+            "  <link rel=\"icon\" type=\"image/svg+xml\" href=\"/favicon.svg\" />",
             "  <title>UpAPI</title>",
             "  <style>",
             "    :root { color-scheme: light; }",
@@ -81,11 +92,16 @@ public static class Home
             "    .empty-state:hover { transform: none; box-shadow: none; border-color: #dbe4ee; }",
             "    .utility-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; }",
             "    .utility-link { width: fit-content; min-width: 140px; }",
+            "    .keybar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 26px 0 8px; padding: 16px; border: 1px solid #dbe4ee; border-radius: 18px; background: rgba(248, 250, 252, 0.74); }",
+            "    .keybar label { font-size: 13px; font-weight: 700; color: #334155; }",
+            "    .keybar input { min-width: 240px; flex: 1; max-width: 420px; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 10px; color: #0f172a; background: #fff; font: inherit; }",
+            "    .keybar button { min-height: 41px; padding: 0 14px; border: 0; border-radius: 10px; background: #082f49; color: #fff; font: inherit; font-weight: 700; cursor: pointer; }",
+            $"    .key-status {{ margin: 0; color: {BrandMuted}; font-size: 13px; }}",
             "    .sql-log-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }",
             "    .sql-log-card { overflow: hidden; border: 1px solid #dbe4ee; border-radius: 18px; background: rgba(255,255,255,0.94); }",
-            "    .sql-log-card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 16px; border-bottom: 1px solid #e7edf4; }",
+            "    .sql-log-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 15px 16px; border-bottom: 1px solid #e7edf4; }",
             "    .sql-log-service { margin: 0; font-family: 'Space Grotesk', sans-serif; font-size: 18px; letter-spacing: -0.025em; }",
-            $"    .sql-log-state {{ color: {BrandMuted}; font-size: 12px; }}",
+            $"    .sql-log-state {{ max-width: 150px; color: {BrandMuted}; font-size: 12px; text-align: right; overflow-wrap: anywhere; }}",
             "    .sql-log-state.error { color: #b91c1c; }",
             "    .sql-log-table { width: 100%; border-collapse: collapse; table-layout: fixed; }",
             "    .sql-log-table th, .sql-log-table td { padding: 10px 9px; border-bottom: 1px solid #edf2f7; text-align: right; }",
@@ -111,6 +127,12 @@ public static class Home
             "        </div>",
             $"        {RenderBrandPanel()}",
             "      </section>",
+            "      <div class=\"keybar\">",
+            "        <label for=\"homeKey\">HomeKey</label>",
+            "        <input id=\"homeKey\" name=\"homeKey\" type=\"password\" autocomplete=\"off\" placeholder=\"Enter HomeKey\" />",
+            "        <button type=\"button\" id=\"saveHomeKey\">Use key</button>",
+            $"        <p class=\"key-status\">{WebUtility.HtmlEncode(homeKeyStatus)}</p>",
+            "      </div>",
             "      <div class=\"section-title\">Swagger Services</div>",
             $"      <div class=\"links\">{swaggerLinks}</div>",
             "      <div class=\"section-title\">SQL Generators</div>",
@@ -121,19 +143,58 @@ public static class Home
             "      <div class=\"utility-row\">",
             "        <a class=\"utility-link\" href=\"/ping\">Ping</a>",
             "        <a class=\"utility-link\" href=\"/live\">Liveness</a>",
-            "        <a class=\"utility-link\" href=\"/health\">Readiness</a>",
             "        <a class=\"utility-link\" href=\"/health/details\">Health Details</a>",
-            "        <a class=\"utility-link\" href=\"/sql-log-view\">SQL Log</a>",
             "      </div>",
             "    </div>",
             "  </main>",
             "  <script>",
+            "    const homeKeyInput = document.getElementById('homeKey');",
+            "    const saveHomeKeyButton = document.getElementById('saveHomeKey');",
+            "    const homeKeyStatus = document.querySelector('.key-status');",
+            "    const homeKeyStorageKey = 'UpApi.HomeKey';",
+            "    function updateProtectedLinks() {",
+            "      const key = homeKeyInput.value.trim();",
+            "      document.querySelectorAll('.protected-link').forEach(link => {",
+            "        const url = new URL(link.dataset.href, window.location.origin);",
+            "        if (key) url.searchParams.set('homeKey', key);",
+            "        link.href = url.pathname + url.search;",
+            "      });",
+            "    }",
+            "    homeKeyInput.value = window.localStorage.getItem(homeKeyStorageKey) || '';",
+            "    homeKeyInput.addEventListener('input', updateProtectedLinks);",
+            "    saveHomeKeyButton.addEventListener('click', async () => {",
+            "      const key = homeKeyInput.value.trim();",
+            "      const validationUrl = new URL('/home-key', window.location.origin);",
+            "      if (key) validationUrl.searchParams.set('homeKey', key);",
+            "      saveHomeKeyButton.disabled = true;",
+            "      homeKeyStatus.textContent = 'Checking HomeKey...';",
+            "      try {",
+            "        const response = await fetch(validationUrl.pathname + validationUrl.search, { cache: 'no-store' });",
+            "        if (!response.ok) throw new Error((await response.text()) || 'Invalid HomeKey.');",
+            "        window.localStorage.setItem(homeKeyStorageKey, key);",
+            "        const pageUrl = new URL(window.location.href);",
+            "        if (key) pageUrl.searchParams.set('homeKey', key);",
+            "        else pageUrl.searchParams.delete('homeKey');",
+            "        window.location.href = pageUrl.pathname + pageUrl.search + pageUrl.hash;",
+            "      } catch (error) {",
+            "        window.localStorage.removeItem(homeKeyStorageKey);",
+            "        homeKeyInput.value = '';",
+            "        updateProtectedLinks();",
+            "        homeKeyStatus.textContent = error instanceof Error ? error.message : 'Invalid HomeKey.';",
+            "        saveHomeKeyButton.disabled = false;",
+            "      }",
+            "    });",
+            "    updateProtectedLinks();",
             "    document.querySelectorAll('.sql-log-card').forEach(async card => {",
             "      const service = card.dataset.service;",
             "      const state = card.querySelector('.sql-log-state');",
             "      try {",
-            "        const response = await fetch('/ServiceLogStatus?service=' + encodeURIComponent(service), { headers: { Accept: 'application/json' } });",
-            "        if (!response.ok) throw new Error('Status unavailable');",
+            "        const statusUrl = new URL('/ServiceLogStatus', window.location.origin);",
+            "        statusUrl.searchParams.set('service', service);",
+            "        const homeKey = homeKeyInput.value.trim();",
+            "        if (homeKey) statusUrl.searchParams.set('homeKey', homeKey);",
+            "        const response = await fetch(statusUrl.pathname + statusUrl.search, { headers: { Accept: 'application/json' } });",
+            "        if (!response.ok) throw new Error((await response.text()) || 'Status unavailable');",
             "        const status = await response.json();",
             "        card.querySelectorAll('[data-field]').forEach(link => {",
             "          const value = status[link.dataset.field] ?? 0;",
@@ -141,8 +202,8 @@ public static class Home
             "          link.dataset.value = String(value);",
             "        });",
             "        state.textContent = 'Live';",
-            "      } catch {",
-            "        state.textContent = 'Unavailable';",
+            "      } catch (error) {",
+            "        state.textContent = error instanceof Error ? error.message : 'Status unavailable';",
             "        state.classList.add('error');",
             "        card.querySelectorAll('[data-field]').forEach(link => link.textContent = '--');",
             "      }",
@@ -235,7 +296,10 @@ public static class Home
             query.Select(item => $"{Uri.EscapeDataString(item.Key)}={Uri.EscapeDataString(item.Value)}"));
         var cssClass = userError ? " user-error" : sqlError ? " sql-error" : string.Empty;
 
-        return $"<a class=\"metric-link{cssClass}\" data-field=\"{WebUtility.HtmlEncode(field)}\" data-value=\"0\" href=\"/sql-log-view?{WebUtility.HtmlEncode(queryString)}\">...</a>";
+        var href = $"/sql-log-view?{queryString}";
+        var encodedHref = WebUtility.HtmlEncode(href);
+
+        return $"<a class=\"metric-link protected-link{cssClass}\" data-field=\"{WebUtility.HtmlEncode(field)}\" data-value=\"0\" data-href=\"{encodedHref}\" href=\"{encodedHref}\">...</a>";
     }
 
     private static string RenderBrandPanel()
@@ -260,20 +324,9 @@ public static class Home
     {
         return $$"""
         <svg viewBox="0 0 48 48" role="img" aria-label="UpAPI icon" width="72" height="72">
-          <rect x="3" y="3" width="42" height="42" rx="16" fill="{{BrandPrimary}}" />
-          <path d="M14 29.5L24 12l10 17.5h-6L24 22l-4 7.5h-6Z" fill="{{BrandCyan}}" />
-          <path d="M21.5 31h5v5h-5z" fill="{{BrandAmber}}" />
-        </svg>
-        """;
-    }
-
-    private static string RenderFaviconSvg()
-    {
-        return $$"""
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
-          <rect x="3" y="3" width="42" height="42" rx="16" fill="{{BrandPrimary}}" />
-          <path d="M14 29.5L24 12l10 17.5h-6L24 22l-4 7.5h-6Z" fill="{{BrandCyan}}" />
-          <path d="M21.5 31h5v5h-5z" fill="{{BrandAmber}}" />
+          <rect x="3" y="3" width="42" height="42" rx="16" fill="{{UpApiBrand.Primary}}" />
+          <path d="M14 29.5L24 12l10 17.5h-6L24 22l-4 7.5h-6Z" fill="{{UpApiBrand.Cyan}}" />
+          <path d="M21.5 31h5v5h-5z" fill="{{UpApiBrand.Amber}}" />
         </svg>
         """;
     }

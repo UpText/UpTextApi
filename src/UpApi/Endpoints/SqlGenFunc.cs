@@ -77,6 +77,11 @@ public static partial class SqlGenFunc
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
+        if (!HomeProtection.IsAuthorized(request))
+        {
+            return Task.FromResult(HomeProtection.Unauthorized());
+        }
+
         return HandleCoreAsync(
             parameters.Service ?? "api",
             parameters.TableSchema ?? GetLegacySchema(request) ?? "dbo",
@@ -98,6 +103,11 @@ public static partial class SqlGenFunc
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
+        if (!HomeProtection.IsAuthorized(request))
+        {
+            return Task.FromResult(HomeProtection.Unauthorized());
+        }
+
         return HandleCoreAsync(
             parameters.Service,
             parameters.TableSchema ?? GetLegacySchema(request) ?? "dbo",

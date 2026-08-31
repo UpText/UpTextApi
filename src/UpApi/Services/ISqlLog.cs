@@ -11,6 +11,10 @@ public interface ISqlLog
     Task<ServiceLogStatusResult> ReadServiceStatusAsync(
         string service,
         CancellationToken cancellationToken = default);
+    Task<SqlProcedureSource?> ReadProcedureSourceAsync(
+        string procedure,
+        string? connectionString = null,
+        CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SqlLogRow>> ReadAsync(
         string? service,
         int? maxHours,

@@ -6,8 +6,15 @@ public static class SqlLogUi
 {
     public static IEndpointRouteBuilder MapSqlLogUi(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/sql-log-view", () =>
-                Results.Content(RenderPage(), "text/html; charset=utf-8"))
+        app.MapGet("/sql-log-view", (HttpRequest request) =>
+            {
+                if (!HomeProtection.IsAuthorized(request))
+                {
+                    return HomeProtection.Unauthorized();
+                }
+
+                return Results.Content(RenderPage(), "text/html; charset=utf-8");
+            })
             .ExcludeFromDescription();
 
         return app;
@@ -16,6 +23,7 @@ public static class SqlLogUi
     private static string RenderPage()
     {
         var apiUrlJson = JsonSerializer.Serialize("/SqlLog");
+        var sourceUrlJson = JsonSerializer.Serialize("/SqlLog/Source");
 
         return $$"""
 <!doctype html>
@@ -26,6 +34,7 @@ public static class SqlLogUi
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <title>SQL Log - UpAPI</title>
   <style>
     :root {
@@ -244,7 +253,7 @@ public static class SqlLogUi
     .sql-cell { width: 740px; max-width: none; padding-block: 8px; }
     .sql-value {
       display: grid;
-      grid-template-columns: auto minmax(0, 1fr);
+      grid-template-columns: auto auto minmax(0, 1fr);
       gap: 2px 8px;
       width: 100%;
       min-width: 0;
@@ -265,7 +274,7 @@ public static class SqlLogUi
       color: #475569;
       line-height: 1.25;
     }
-    .copy-sql-button {
+    .sql-icon-button {
       display: inline-grid;
       place-items: center;
       width: 20px;
@@ -277,11 +286,12 @@ public static class SqlLogUi
       background: #fff;
       cursor: pointer;
     }
-    .copy-sql-button:hover,
-    .copy-sql-button:focus-visible { border-color: #0891b2; color: var(--teal); }
-    .copy-sql-button:focus-visible { outline: 2px solid #0891b2; outline-offset: 2px; }
-    .copy-sql-button.copied { border-color: #0f766e; color: #0f766e; background: #ecfdf5; }
-    .copy-sql-button svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; }
+    .sql-icon-button:hover,
+    .sql-icon-button:focus-visible { border-color: #0891b2; color: var(--teal); }
+    .sql-icon-button:focus-visible { outline: 2px solid #0891b2; outline-offset: 2px; }
+    .sql-icon-button.copied { border-color: #0f766e; color: #0f766e; background: #ecfdf5; }
+    .sql-icon-button.loading { cursor: wait; opacity: 0.65; }
+    .sql-icon-button svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; }
     .status {
       display: inline-flex;
       min-width: 48px;
@@ -497,6 +507,7 @@ public static class SqlLogUi
 
   <script>
     const apiUrl = {{apiUrlJson}};
+    const sourceUrl = {{sourceUrlJson}};
     const pageSize = 20;
     let fromRow = 0;
     let currentCount = 0;
@@ -563,6 +574,8 @@ public static class SqlLogUi
       params.set("sortDirection", sortDirection);
       params.set("FromRow", fromRow.toString());
       params.set("ToRow", (fromRow + pageSize - 1).toString());
+      const homeKey = new URLSearchParams(window.location.search).get("homeKey");
+      if (homeKey) params.set("homeKey", homeKey);
       return params;
     }
 
@@ -598,28 +611,37 @@ public static class SqlLogUi
       row.appendChild(td);
     }
 
-    function sqlExecutionCell(row, value) {
+    function sqlExecutionCell(row, value, rowService) {
       const td = document.createElement("td");
       const container = document.createElement("div");
       const command = document.createElement("span");
       const params = document.createElement("span");
       const copyButton = document.createElement("button");
+      const sourceButton = document.createElement("button");
       const parts = splitSqlExecution(value);
+      const procedureName = extractProcedureName(parts.fullText);
 
       td.className = "sql-cell";
       container.className = "sql-value";
       command.className = "sql-command";
       command.textContent = parts.command;
-      copyButton.className = "copy-sql-button";
+      copyButton.className = "sql-icon-button";
       copyButton.type = "button";
       copyButton.title = "Copy SQL execution";
       copyButton.setAttribute("aria-label", "Copy SQL execution");
       copyButton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
       copyButton.addEventListener("click", () => copySqlExecution(copyButton, parts.fullText));
+      sourceButton.className = "sql-icon-button";
+      sourceButton.type = "button";
+      sourceButton.title = "View stored procedure source";
+      sourceButton.setAttribute("aria-label", "View stored procedure source");
+      sourceButton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m16 18 6-6-6-6"></path><path d="m8 6-6 6 6 6"></path><path d="m14.5 4-5 16"></path></svg>';
+      sourceButton.addEventListener("click", () => openSourceModal(sourceButton, procedureName, rowService));
       params.className = "sql-params";
       params.textContent = parts.parameters;
       if (parts.fullText) container.title = parts.fullText;
       if (parts.fullText) container.appendChild(copyButton);
+      if (procedureName) container.appendChild(sourceButton);
       container.appendChild(command);
       if (parts.parameters !== "") container.appendChild(params);
 
@@ -627,13 +649,45 @@ public static class SqlLogUi
       row.appendChild(td);
     }
 
+    function extractProcedureName(value) {
+      const text = (value || "").trim();
+      const execMatch = text.match(/^EXEC(?:UTE)?\s+/i);
+      if (!execMatch) return "";
+
+      let index = execMatch[0].length;
+      let procedure = "";
+      let terminator = "";
+
+      while (index < text.length) {
+        const character = text[index];
+
+        if (terminator === "" && (/\s/.test(character) || character === ",")) break;
+
+        procedure += character;
+
+        if (terminator === "") {
+          if (character === "[") terminator = "]";
+          if (character === '"') terminator = '"';
+        } else if (character === terminator) {
+          terminator = "";
+        }
+
+        index += 1;
+      }
+
+      return procedure.replace(/;$/, "").trim();
+    }
+
     function splitSqlExecution(value) {
       const fullText = (value || "").replace(/\s+/g, " ").trim();
-      const match = fullText.match(/^(EXEC\s+\S+)\s+(.+)$/i);
-      if (!match) return { command: fullText, parameters: "", fullText };
+      const execMatch = fullText.match(/^EXEC(?:UTE)?\s+/i);
+      const procedureName = extractProcedureName(fullText);
+      if (!execMatch || !procedureName) return { command: fullText, parameters: "", fullText };
+
+      const parameterStart = execMatch[0].length + procedureName.length;
       return {
-        command: match[1],
-        parameters: match[2].replace(/,\s*/g, ", "),
+        command: `${execMatch[0].trim()} ${procedureName}`,
+        parameters: fullText.slice(parameterStart).replace(/^,/, "").trim().replace(/,\s*/g, ", "),
         fullText
       };
     }
@@ -657,6 +711,34 @@ public static class SqlLogUi
 
       button.classList.add("copied");
       window.setTimeout(() => button.classList.remove("copied"), 900);
+    }
+
+    async function openSourceModal(button, procedureName, rowService) {
+      if (!procedureName) return;
+
+      const params = new URLSearchParams();
+      params.set("procedure", procedureName);
+      if ((rowService || "").trim() !== "") params.set("service", rowService.trim());
+      const homeKey = new URLSearchParams(window.location.search).get("homeKey");
+      if (homeKey) params.set("homeKey", homeKey);
+
+      button.disabled = true;
+      button.classList.add("loading");
+
+      try {
+        const response = await fetch(`${sourceUrl}?${params}`, { headers: { Accept: "application/json" } });
+        if (!response.ok) {
+          throw new Error((await response.text()) || `Request failed with status ${response.status}`);
+        }
+
+        const source = await response.json();
+        openPayloadModal(source.procedureName || procedureName, source.definition || "");
+      } catch (error) {
+        openPayloadModal(`Source: ${procedureName}`, error instanceof Error ? error.message : "Unable to load stored procedure source.");
+      } finally {
+        button.disabled = false;
+        button.classList.remove("loading");
+      }
     }
 
     function formatPayload(value) {
@@ -749,7 +831,7 @@ public static class SqlLogUi
         cell(row, "", timestamp, item.timeStamp);
         statusCell(row, item.returnValue);
         cell(row, "mono", item.msUsed == null ? "" : item.msUsed + " ms");
-        sqlExecutionCell(row, item.execString);
+        sqlExecutionCell(row, item.execString, item.apiName || service);
         payloadCell(row, item.unexpectedError ? "Response / error" : "Response", response);
         payloadCell(row, "Request", item.requestBody || "");
         cell(row, "", item.swaServer || "", item.swaServer);

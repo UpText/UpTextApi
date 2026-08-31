@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
+using UpApi.Configuration;
 using UpApi.Services;
 
 namespace UpApi.Endpoints;
@@ -13,12 +15,140 @@ public static class SqlLogEndpoint
             .WithSummary("Return filtered SQL log entries")
             .Produces<IReadOnlyList<SqlLogRow>>(StatusCodes.Status200OK, "application/json")
             .Produces(StatusCodes.Status400BadRequest, contentType: "text/plain")
+            .Produces(StatusCodes.Status503ServiceUnavailable, contentType: "text/plain")
+            .Produces(StatusCodes.Status500InternalServerError, contentType: "text/plain");
+
+        app.MapGet("/SqlLog/Source", HandleSourceAsync)
+            .WithName("SqlLogSource")
+            .WithTags("BuiltIn")
+            .WithSummary("Return T-SQL source for a stored procedure referenced by a SQL log entry")
+            .Produces<SqlProcedureSource>(StatusCodes.Status200OK, "application/json")
+            .Produces(StatusCodes.Status400BadRequest, contentType: "text/plain")
+            .Produces(StatusCodes.Status403Forbidden, contentType: "text/plain")
+            .Produces(StatusCodes.Status404NotFound, contentType: "text/plain")
+            .Produces(StatusCodes.Status503ServiceUnavailable, contentType: "text/plain")
             .Produces(StatusCodes.Status500InternalServerError, contentType: "text/plain");
 
         return app;
     }
 
+    private static async Task<IResult> HandleSourceAsync(
+        HttpRequest request,
+        ISqlLog sqlLog,
+        IServiceConfigResolver serviceConfigResolver,
+        IOptions<ServiceConfigurations> serviceOptions,
+        ILoggerFactory loggerFactory,
+        CancellationToken cancellationToken,
+        string? service = null,
+        string? procedure = null)
+    {
+        if (!HomeProtection.IsAuthorized(request))
+        {
+            return HomeProtection.Unauthorized();
+        }
+
+        if (string.IsNullOrWhiteSpace(procedure))
+        {
+            return Results.Text("procedure is required.", "text/plain", statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        try
+        {
+            var sourceConnectionString = ResolveSourceConnectionString(
+                service,
+                procedure,
+                serviceConfigResolver,
+                serviceOptions.Value);
+            var source = await sqlLog.ReadProcedureSourceAsync(procedure, sourceConnectionString, cancellationToken);
+            if (source is null)
+            {
+                return Results.Text("Stored procedure source was not found.", "text/plain", statusCode: StatusCodes.Status404NotFound);
+            }
+
+            return Results.Json(source);
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.Text(ex.Message, "text/plain", statusCode: StatusCodes.Status400BadRequest);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Results.Text(ex.Message, "text/plain", statusCode: StatusCodes.Status403Forbidden);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Equals("SqlLog is not configured.", StringComparison.Ordinal))
+        {
+            return Results.Text(
+                "SQL log is not configured.",
+                "text/plain",
+                statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+        catch (Exception ex)
+        {
+            loggerFactory.CreateLogger("SqlLogEndpoint").LogError(ex, "Failed to read source for procedure {Procedure}", procedure);
+            return Results.Text("Failed to read stored procedure source.", "text/plain", statusCode: StatusCodes.Status500InternalServerError);
+        }
+    }
+
+    private static string? ResolveSourceConnectionString(
+        string? service,
+        string procedure,
+        IServiceConfigResolver serviceConfigResolver,
+        ServiceConfigurations serviceConfigurations)
+    {
+        if (!string.IsNullOrWhiteSpace(service) &&
+            serviceConfigResolver.TryGet(service, out var serviceConfiguration))
+        {
+            return serviceConfiguration.SqlConnectionString;
+        }
+
+        var schema = ExtractSchemaName(procedure);
+        if (string.IsNullOrWhiteSpace(schema))
+        {
+            return null;
+        }
+
+        foreach (var configuredService in serviceConfigurations.Services)
+        {
+            if (string.Equals(configuredService.Value.SqlSchema, schema, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(configuredService.Key, schema, StringComparison.OrdinalIgnoreCase))
+            {
+                return configuredService.Value.SqlConnectionString;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? ExtractSchemaName(string procedure)
+    {
+        var trimmed = procedure.Trim().TrimEnd(';').TrimEnd();
+        var separatorIndex = trimmed.LastIndexOf('.');
+        if (separatorIndex <= 0)
+        {
+            return null;
+        }
+
+        return UnquoteSqlIdentifier(trimmed[..separatorIndex]);
+    }
+
+    private static string UnquoteSqlIdentifier(string value)
+    {
+        var trimmed = value.Trim();
+        if (trimmed.Length >= 2 && trimmed[0] == '[' && trimmed[^1] == ']')
+        {
+            return trimmed[1..^1].Replace("]]", "]", StringComparison.Ordinal);
+        }
+
+        if (trimmed.Length >= 2 && trimmed[0] == '"' && trimmed[^1] == '"')
+        {
+            return trimmed[1..^1].Replace("\"\"", "\"", StringComparison.Ordinal);
+        }
+
+        return trimmed;
+    }
+
     private static async Task<IResult> HandleAsync(
+        HttpRequest request,
         ISqlLog sqlLog,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken,
@@ -34,6 +164,11 @@ public static class SqlLogEndpoint
         string sortBy = "time",
         string sortDirection = "desc")
     {
+        if (!HomeProtection.IsAuthorized(request))
+        {
+            return HomeProtection.Unauthorized();
+        }
+
         if (maxHours < 0)
         {
             return Results.Text("maxHours must be zero or greater.", "text/plain", statusCode: StatusCodes.Status400BadRequest);
@@ -87,6 +222,13 @@ public static class SqlLogEndpoint
                 cancellationToken);
 
             return Results.Json(rows);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Equals("SqlLog is not configured.", StringComparison.Ordinal))
+        {
+            return Results.Text(
+                "SQL log is not configured.",
+                "text/plain",
+                statusCode: StatusCodes.Status503ServiceUnavailable);
         }
         catch (Exception ex)
         {

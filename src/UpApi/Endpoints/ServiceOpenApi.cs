@@ -43,6 +43,11 @@ public static class ServiceOpenApi
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
+        if (!HttpMethods.IsOptions(request.Method) && !HomeProtection.IsAuthorized(request))
+        {
+            return HomeProtection.Unauthorized();
+        }
+
         var logger = loggerFactory.CreateLogger("ServiceOpenApi");
         logger.LogInformation("OpenApi requested for service {Service}. Method={Method} Url={Url}", service, request.Method, request.GetDisplayUrl());
 

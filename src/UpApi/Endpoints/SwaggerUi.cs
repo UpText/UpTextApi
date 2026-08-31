@@ -9,20 +9,44 @@ public static class SwaggerUi
 
     public static IEndpointRouteBuilder MapSwaggerUi(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/docs", () => Results.Content(RenderSwaggerUiPage(null), "text/html; charset=utf-8"))
+        app.MapGet("/docs", (HttpRequest request) =>
+            {
+                if (!HomeProtection.IsAuthorized(request))
+                {
+                    return HomeProtection.Unauthorized();
+                }
+
+                return Results.Content(RenderSwaggerUiPage(request, null), "text/html; charset=utf-8");
+            })
             .ExcludeFromDescription();
 
-        app.MapGet("/docs/{service}", (string service) => Results.Content(RenderSwaggerUiPage(service), "text/html; charset=utf-8"))
+        app.MapGet("/docs/{service}", (HttpRequest request, string service) =>
+            {
+                if (!HomeProtection.IsAuthorized(request))
+                {
+                    return HomeProtection.Unauthorized();
+                }
+
+                return Results.Content(RenderSwaggerUiPage(request, service), "text/html; charset=utf-8");
+            })
             .ExcludeFromDescription();
 
         return app;
     }
 
-    private static string RenderSwaggerUiPage(string? service)
+    private static string RenderSwaggerUiPage(HttpRequest request, string? service)
     {
         var swaggerUrl = string.IsNullOrWhiteSpace(service)
             ? DefaultSwaggerUrl
             : $"/{Uri.EscapeDataString(service)}/swagger.json";
+        var homeKey = request.Query.TryGetValue("homeKey", out var homeKeyValue)
+            ? homeKeyValue.ToString()
+            : null;
+        if (!string.IsNullOrWhiteSpace(homeKey))
+        {
+            swaggerUrl += $"?homeKey={Uri.EscapeDataString(homeKey)}";
+        }
+
         var pageTitle = string.IsNullOrWhiteSpace(service)
             ? "UpApi Swagger"
             : $"UpApi Swagger - {WebUtility.HtmlEncode(service)}";
@@ -36,6 +60,7 @@ public static class SwaggerUi
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <title>{{pageTitle}}</title>
   <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
   <style>

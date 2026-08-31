@@ -769,6 +769,8 @@ Built-in docs endpoints:
 - `/docs` for Swagger UI
 - `/docs/{service}` for a service Swagger UI page
 
+Set `SQLWEBAPI__HOMEKEY` to require a HomeKey for Swagger UI, generated OpenAPI JSON, SQL generator pages/API calls, and SQL log pages/API calls. The root home page stays public so it can show the key input. Accepted inputs are `?homeKey=...`, `?HomeKey=...`, `?key=...`, or the `X-Home-Key` header.
+
 Examples:
 
 ```text

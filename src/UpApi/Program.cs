@@ -119,8 +119,22 @@ if (hasConfiguredCorsOrigins)
     app.UseCors("LocalFrontend");
 }
 
+app.Use(async (context, next) =>
+{
+    if (HttpMethods.IsGet(context.Request.Method) &&
+        context.Request.Path.Value?.EndsWith("/swagger.json", StringComparison.OrdinalIgnoreCase) == true &&
+        !HomeProtection.IsAuthorized(context.Request))
+    {
+        await HomeProtection.Unauthorized().ExecuteAsync(context);
+        return;
+    }
+
+    await next(context);
+});
+
 app.MapPing();
 app.MapHealth();
+app.MapFavicon();
 app.MapHome();
 app.MapServerTime();
 app.MapServiceLogStatus();
