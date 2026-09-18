@@ -1,11 +1,11 @@
-# UpApi
+# UpTextApi
 
-`UpApi` turns SQL Server stored procedures into a REST API.
+`UpTextApi` turns SQL Server stored procedures into a REST API.
 
 You define your API in SQL, not in controllers:
 
 - Create stored procedures like `customers_get`, `customers_post`, `customers_put`, and `customers_delete`
-- Point `UpApi` at a SQL Server database and schema
+- Point `UpTextApi` at a SQL Server database and schema
 - Run the app as a container from Docker Hub or from source
 - Get REST endpoints, JWT protection, OpenAPI, and Swagger UI automatically
 
@@ -16,7 +16,7 @@ It is built for teams that want a simple SQL-first API layer with very little mo
 - SQL-first REST API generation from stored procedures
 - SQL Server support
 - All resources are defined in SQL
-- Run from the `uptext/upapi` Docker image
+- Run from the `uptext/uptextapi` Docker image
 - Run from source with `dotnet run`
 - Automatic OpenAPI generation per service
 - Built-in Swagger UI
@@ -28,7 +28,7 @@ It is built for teams that want a simple SQL-first API layer with very little mo
 
 ## How It Works
 
-`UpApi` maps HTTP verbs to stored procedure names:
+`UpTextApi` maps HTTP verbs to stored procedure names:
 
 - `GET /api/customers` -> `api.customers_get`
 - `GET /api/customers/1` -> `api.customers_get @id = 1`
@@ -66,36 +66,36 @@ Thus many api's can be hosted by a single container. Also the service user shoul
 
 ## Project Layout
 
-- [`src/UpApi/Program.cs`](/Users/ole/UpText/Repos/UpApi/src/UpApi/Program.cs) bootstraps the API
-- [`src/UpApi/Endpoints/SqlWebApi.cs`](/Users/ole/UpText/Repos/UpApi/src/UpApi/Endpoints/SqlWebApi.cs) exposes the SQL-backed REST endpoints
-- [`src/UpApi/Endpoints/ServiceOpenApi.cs`](/Users/ole/UpText/Repos/UpApi/src/UpApi/Endpoints/ServiceOpenApi.cs) generates service-specific OpenAPI
-- [`src/UpApi/Endpoints/SwaggerUi.cs`](/Users/ole/UpText/Repos/UpApi/src/UpApi/Endpoints/SwaggerUi.cs) serves Swagger UI
-- [`src/UpApi/Endpoints/SqlGenFunc.cs`](/Users/ole/UpText/Repos/UpApi/src/UpApi/Endpoints/SqlGenFunc.cs) can generate CRUD stored procedure templates
+- [`src/UpTextApi/Program.cs`](/Users/ole/UpText/Repos/UpTextApi/src/UpTextApi/Program.cs) bootstraps the API
+- [`src/UpTextApi/Endpoints/SqlWebApi.cs`](/Users/ole/UpText/Repos/UpTextApi/src/UpTextApi/Endpoints/SqlWebApi.cs) exposes the SQL-backed REST endpoints
+- [`src/UpTextApi/Endpoints/ServiceOpenApi.cs`](/Users/ole/UpText/Repos/UpTextApi/src/UpTextApi/Endpoints/ServiceOpenApi.cs) generates service-specific OpenAPI
+- [`src/UpTextApi/Endpoints/SwaggerUi.cs`](/Users/ole/UpText/Repos/UpTextApi/src/UpTextApi/Endpoints/SwaggerUi.cs) serves Swagger UI
+- [`src/UpTextApi/Endpoints/SqlGenFunc.cs`](/Users/ole/UpText/Repos/UpTextApi/src/UpTextApi/Endpoints/SqlGenFunc.cs) can generate CRUD stored procedure templates
 
 ## Quick Start
 
 ### 1. Run the container from Docker Hub
 
-The default way to run `UpApi` is the published Docker image:
+The default way to run `UpTextApi` is the published Docker image:
 
 ```bash
 docker run --rm \
   -p 5092:8080 \
   -e ASPNETCORE_URLS=http://+:8080 \
   -e JWT_SECRET=replace-with-a-long-random-secret \
-  -e JWT_ISSUER=UpApi \
-  -e JWT_AUDIENCE=UpApiClient \
+  -e JWT_ISSUER=UpTextApi \
+  -e JWT_AUDIENCE=UpTextApiClient \
   -e JWT_HOURS=8 \
   -e Services__api__SqlSchema=api \
   -e Services__api__TableSchema=dbo \
   -e Services__api__SqlGenerator=true \
   -e 'Services__api__SqlConnectionString=Server=host.docker.internal,1433;Initial Catalog=MyDb;User ID=upservice;Password=VerySecret!321;Encrypt=False;TrustServerCertificate=True;' \
-  uptext/upapi
+  uptext/uptextapi
 ```
 
 Notes:
 
-- `host.docker.internal` is typically the right server name when SQL Server is running on your machine and `UpApi` is inside Docker
+- `host.docker.internal` is typically the right server name when SQL Server is running on your machine and `UpTextApi` is inside Docker
 - in `zsh`, wrap connection strings in single quotes when the password contains `!`
 - this example configures only one service, `api`
 - the default local URL is [http://localhost:5092](http://localhost:5092)
@@ -111,15 +111,15 @@ Useful built-in routes:
 
 ### 2. Configure a service
 
-For containers, the recommended approach is environment variables. If you run from source, you can also use [`src/UpApi/appsettings.json`](/Users/ole/UpText/Repos/UpApi/src/UpApi/appsettings.json).
+For containers, the recommended approach is environment variables. If you run from source, you can also use [`src/UpTextApi/appsettings.json`](/Users/ole/UpText/Repos/UpTextApi/src/UpTextApi/appsettings.json).
 
 Minimal configuration example:
 
 ```json
 {
   "JWT_SECRET": "replace-with-a-long-random-secret",
-  "JWT_ISSUER": "UpApi",
-  "JWT_AUDIENCE": "UpApiClient",
+  "JWT_ISSUER": "UpTextApi",
+  "JWT_AUDIENCE": "UpTextApiClient",
   "JWT_HOURS": "8",
   "Cors": {
     "AllowedOrigins": []
@@ -148,14 +148,14 @@ Secret placeholders can be used inside configuration values that contain secrets
 {
   "Services": {
     "api": {
-      "SqlConnectionString": "Server=localhost,1433;Initial Catalog=MyDb;User ID=upservice;Password={{secret:upapi_sql_password}};Encrypt=False;TrustServerCertificate=True;"
+      "SqlConnectionString": "Server=localhost,1433;Initial Catalog=MyDb;User ID=upservice;Password={{secret:uptextapi_sql_password}};Encrypt=False;TrustServerCertificate=True;"
     }
   },
-  "JWT_SECRET": "{{secret:upapi_jwt_secret}}"
+  "JWT_SECRET": "{{secret:uptextapi_jwt_secret}}"
 }
 ```
 
-At runtime, `{{secret:upapi_sql_password}}` is resolved from either an environment variable named `upapi_sql_password` or `UPAPI_SQL_PASSWORD`, or from a Docker Secret file at `/run/secrets/upapi_sql_password`. Set `UPAPI_SECRETS_DIRECTORY` to use a different secrets directory.
+At runtime, `{{secret:uptextapi_sql_password}}` is resolved from either an environment variable named `uptextapi_sql_password` or `UPTEXTAPI_SQL_PASSWORD`, or from a Docker Secret file at `/run/secrets/uptextapi_sql_password`. Set `UPTEXTAPI_SECRETS_DIRECTORY` to use a different secrets directory.
 
 ### CORS configuration
 
@@ -163,8 +163,8 @@ CORS is now fully configuration-driven.
 
 Set allowed origins in:
 
-- [`src/UpApi/appsettings.Development.json`](/Users/ole/UpText/Repos/UpApi/src/UpApi/appsettings.Development.json) for local development
-- [`src/UpApi/appsettings.json`](/Users/ole/UpText/Repos/UpApi/src/UpApi/appsettings.json) or environment variables for shared environments and containers
+- [`src/UpTextApi/appsettings.Development.json`](/Users/ole/UpText/Repos/UpTextApi/src/UpTextApi/appsettings.Development.json) for local development
+- [`src/UpTextApi/appsettings.json`](/Users/ole/UpText/Repos/UpTextApi/src/UpTextApi/appsettings.json) or environment variables for shared environments and containers
 
 Example:
 
@@ -179,11 +179,11 @@ Example:
 }
 ```
 
-If `Cors:AllowedOrigins` is empty, `UpApi` does not send CORS allow headers, so cross-origin browser requests are not allowed.
+If `Cors:AllowedOrigins` is empty, `UpTextApi` does not send CORS allow headers, so cross-origin browser requests are not allowed.
 
 ### SQL logging
 
-`UpApi` can write one row per API execution to SQL Server. This is useful when you want a simple audit trail for requests, status codes, execution time, generated SQL exec strings, request bodies, response bodies, and unexpected errors.
+`UpTextApi` can write one row per API execution to SQL Server. This is useful when you want a simple audit trail for requests, status codes, execution time, generated SQL exec strings, request bodies, response bodies, and unexpected errors.
 
 Configure it with a `SqlLog` section:
 
@@ -226,7 +226,7 @@ Retention cleanup runs once when the application starts and every 24 hours after
 that. Rows older than `RetentionDays` are deleted in batches. Set
 `CleanupEnabled` to `false` to retain rows indefinitely.
 
-For local development, `UpApi` can create the log table automatically at startup if it does not already exist.
+For local development, `UpTextApi` can create the log table automatically at startup if it does not already exist.
 
 For production, it is better to have `dbo` pre-create `api.log` and grant
 `INSERT`, `SELECT`, and `DELETE` to `upservice`. That keeps the runtime account
@@ -294,7 +294,7 @@ If logging is enabled, every executed endpoint writes a row to the configured lo
 
 ### 3. Create the SQL service user
 
-`UpApi` only needs permission to connect to the database and execute stored procedures in the configured schema. Using a dedicated service login instead of `sa` keeps local setup closer to production and limits the blast radius if the API credentials are exposed.
+`UpTextApi` only needs permission to connect to the database and execute stored procedures in the configured schema. Using a dedicated service login instead of `sa` keeps local setup closer to production and limits the blast radius if the API credentials are exposed.
 
 Run this in SQL Server before starting the API:
 
@@ -307,7 +307,7 @@ GRANT EXECUTE ON SCHEMA::[api] TO upservice;
 GRANT INSERT ON [api].[log] TO upservice;
 ```
 
-This matches the example connection string above and gives `UpApi` access to execute procedures in the `api` schema and write to `api.log` without broader database permissions.
+This matches the example connection string above and gives `UpTextApi` access to execute procedures in the `api` schema and write to `api.log` without broader database permissions.
 
 ### 4. Create stored procedures
 
@@ -358,7 +358,7 @@ This demo is written for a DBA working in SQL Server Management Studio (SSMS). A
 - an `upservice` login and user with minimal permissions
 - a `dbo.customers` table with demo data
 - CRUD stored procedures for `Customer`
-- an `UpApi` container running from Docker Hub
+- an `UpTextApi` container running from Docker Hub
 
 After the container starts, the first URL to try is:
 
@@ -380,9 +380,9 @@ Open a new query window in SSMS as a sufficiently privileged login such as `sa`,
 USE master;
 GO
 
-IF DB_ID('UpApiDemo') IS NULL
+IF DB_ID('UpTextApiDemo') IS NULL
 BEGIN
-    CREATE DATABASE UpApiDemo;
+    CREATE DATABASE UpTextApiDemo;
 END;
 GO
 
@@ -392,7 +392,7 @@ BEGIN
 END;
 GO
 
-USE UpApiDemo;
+USE UpTextApiDemo;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = 'api')
@@ -595,7 +595,7 @@ GO
 
 You should now see:
 
-- database `UpApiDemo`
+- database `UpTextApiDemo`
 - schema `api`
 - table `dbo.customers`
 - procedures `api.customers_get`, `api.customers_post`, `api.customers_put`, `api.customers_delete`, and `api.customers_openapi`
@@ -604,7 +604,7 @@ You should now see:
 You can also validate the seed data directly in SSMS:
 
 ```sql
-USE UpApiDemo;
+USE UpTextApiDemo;
 GO
 
 SELECT * FROM dbo.customers ORDER BY Id;
@@ -613,19 +613,19 @@ GO
 
 ### 3. Start the container from Docker Hub
 
-Run `UpApi` as a container with a minimal configuration that only defines the `api` service:
+Run `UpTextApi` as a container with a minimal configuration that only defines the `api` service:
 
 ```bash
 docker run --rm \
   -p 5092:8080 \
   -e ASPNETCORE_URLS=http://+:8080 \
   -e JWT_SECRET=replace-with-a-long-random-secret \
-  -e JWT_ISSUER=UpApi \
-  -e JWT_AUDIENCE=UpApiClient \
+  -e JWT_ISSUER=UpTextApi \
+  -e JWT_AUDIENCE=UpTextApiClient \
   -e JWT_HOURS=8 \
   -e Services__api__SqlSchema=api \
-  -e Services__api__SqlConnectionString="Server=host.docker.internal,1433;Initial Catalog=UpApiDemo;User ID=upservice;Password=VerySecret!321;Encrypt=False;TrustServerCertificate=True;" \
-  uptext/upapi
+  -e Services__api__SqlConnectionString="Server=host.docker.internal,1433;Initial Catalog=UpTextApiDemo;User ID=upservice;Password=VerySecret!321;Encrypt=False;TrustServerCertificate=True;" \
+  uptext/uptextapi
 ```
 
 Notes:
@@ -703,7 +703,7 @@ Two important conventions are used:
 
 ### 1. `login_post` can generate a token
 
-If you create a procedure named `login_post`, `UpApi` can turn its result into a JWT response:
+If you create a procedure named `login_post`, `UpTextApi` can turn its result into a JWT response:
 
 ```text
 POST /api/login
@@ -717,7 +717,7 @@ If the procedure returns one row or a JSON object with claims, the API responds 
 }
 ```
 
-If the credentials do not match, return no rows. `UpApi` responds with `401 Unauthorized`
+If the credentials do not match, return no rows. `UpTextApi` responds with `401 Unauthorized`
 and `{"message":"Invalid username or password"}`.
 
 ### 2. `@auth_*` parameters protect endpoints
@@ -728,7 +728,7 @@ If a stored procedure has parameters like:
 @auth_userid nvarchar(100)
 ```
 
-then `UpApi`:
+then `UpTextApi`:
 
 - expects `Authorization: Bearer <token>`
 - validates the JWT
@@ -760,7 +760,7 @@ curl http://localhost:5092/api/profile \
 
 ## OpenAPI And Swagger UI
 
-`UpApi` generates documentation automatically.
+`UpTextApi` generates documentation automatically.
 
 Built-in docs endpoints:
 
@@ -811,11 +811,11 @@ FROM (VALUES
 GO
 ```
 
-For the full shape, see [`src/UpApi/Docs/ServiceOpenApi.md`](/Users/ole/UpText/Repos/UpApi/src/UpApi/Docs/ServiceOpenApi.md).
+For the full shape, see [`src/UpTextApi/Docs/ServiceOpenApi.md`](/Users/ole/UpText/Repos/UpTextApi/src/UpTextApi/Docs/ServiceOpenApi.md).
 
 ## SQL Generator
 
-`UpApi` can generate starter SQL for a table.
+`UpTextApi` can generate starter SQL for a table.
 
 Routes:
 
@@ -852,7 +852,7 @@ It defaults to `dbo` and is included in the SQL generator UI URL.
 
 ## Paging, Sorting, And Filtering
 
-If your procedure supports these parameters, `UpApi` knows how to populate them:
+If your procedure supports these parameters, `UpTextApi` knows how to populate them:
 
 - `@first_row`
 - `@last_row`
@@ -866,7 +866,7 @@ Example request:
 curl "http://localhost:5092/api/customers?range=[0,24]&sort=[\"Name\",\"ASC\"]&filter=ada"
 ```
 
-For successful collection `GET` responses, `UpApi` also emits a `Content-Range` header.
+For successful collection `GET` responses, `UpTextApi` also emits a `Content-Range` header.
 
 ## Useful Stored Procedure Conventions
 
@@ -892,7 +892,7 @@ If a result contains:
 - first column named `content_type`
 - second column containing bytes
 
-then `UpApi` returns that as a binary HTTP response.
+then `UpTextApi` returns that as a binary HTTP response.
 
 ## Why Teams Use This
 
@@ -910,32 +910,32 @@ then `UpApi` returns that as a binary HTTP response.
 
 ## Run From Source
 
-Most users should run `UpApi` from Docker Hub. Running from source is mainly useful when you are developing or debugging the project itself.
+Most users should run `UpTextApi` from Docker Hub. Running from source is mainly useful when you are developing or debugging the project itself.
 
 Run directly with the .NET SDK:
 
 ```bash
-dotnet run --project /Users/ole/UpText/Repos/UpApi/src/UpApi/UpApi.csproj
+dotnet run --project /Users/ole/UpText/Repos/UpTextApi/src/UpTextApi/UpTextApi.csproj
 ```
 
-Build the container locally instead of pulling `uptext/upapi`:
+Build the container locally instead of pulling `uptext/uptextapi`:
 
 ```bash
-docker build -f /Users/ole/UpText/Repos/UpApi/src/UpApi/Dockerfile -t upapi /Users/ole/UpText/Repos/UpApi/src
+docker build -f /Users/ole/UpText/Repos/UpTextApi/src/UpTextApi/Dockerfile -t uptextapi /Users/ole/UpText/Repos/UpTextApi/src
 ```
 
 Configuration can come from:
 
 - environment variables
-- [`src/UpApi/appsettings.json`](/Users/ole/UpText/Repos/UpApi/src/UpApi/appsettings.json)
-- [`src/UpApi/appsettings.Development.json`](/Users/ole/UpText/Repos/UpApi/src/UpApi/appsettings.Development.json)
+- [`src/UpTextApi/appsettings.json`](/Users/ole/UpText/Repos/UpTextApi/src/UpTextApi/appsettings.json)
+- [`src/UpTextApi/appsettings.Development.json`](/Users/ole/UpText/Repos/UpTextApi/src/UpTextApi/appsettings.Development.json)
 
 ## Next Things To Add
 
 Good additions for this project could be:
 
 - a sample database script under `/samples`
-- a `docker-compose.yml` with SQL Server and `UpApi`
+- a `docker-compose.yml` with SQL Server and `UpTextApi`
 - a production deployment example
 - example login/auth SQL scripts
 - integration tests for the CRUD flow

@@ -20,4 +20,4 @@ riderModule.iml
 _ReSharper.Caches/
 
 # Local development config
-src/UpApi/appsettings.Development.json
+src/UpTextApi/appsettings.Development.json

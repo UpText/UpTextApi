@@ -10,9 +10,9 @@
             "request": "launch",
             "preLaunchTask": "build",
             // If you have changed target frameworks, make sure to update the program path.
-            "program": "${workspaceFolder}/src/UpApi/bin/Debug/net10.0/UpApi.dll",
+            "program": "${workspaceFolder}/src/UpTextApi/bin/Debug/net10.0/UpTextApi.dll",
             "args": [],
-            "cwd": "${workspaceFolder}/src/UpApi",
+            "cwd": "${workspaceFolder}/src/UpTextApi",
             "stopAtEntry": false,
             // Enable launching a web browser when ASP.NET Core starts. For more information: https://aka.ms/VSCode-CS-LaunchJson-WebBrowser
             "serverReadyAction": {

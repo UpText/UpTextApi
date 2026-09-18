@@ -1,0 +1,46 @@
+@UpTextApi_HostAddress = http://localhost:5092
+
+GET {{UpTextApi_HostAddress}}/ping
+Accept: text/plain
+
+###
+
+POST {{UpTextApi_HostAddress}}/ping
+Accept: text/plain
+
+###
+
+GET {{UpTextApi_HostAddress}}/time
+Accept: application/json
+
+###
+
+GET {{UpTextApi_HostAddress}}/SqlLog?service=api&maxHours=24&aboveTime=500&OnlySqlError=true&FromRow=0&ToRow=100
+Accept: application/json
+
+###
+
+GET {{UpTextApi_HostAddress}}/ServiceLogStatus?service=api
+Accept: application/json
+
+###
+
+GET {{UpTextApi_HostAddress}}/images/northwind/Categories/1
+Accept: image/png
+
+###
+
+GET {{UpTextApi_HostAddress}}/images/northwind/Categories/1?raw=true
+Accept: application/octet-stream
+
+###
+
+GET {{UpTextApi_HostAddress}}/docs/northwind
+Accept: text/html
+
+###
+
+GET {{UpTextApi_HostAddress}}/northwind/Categories
+Accept: application/json
+
+###
