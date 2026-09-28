@@ -260,15 +260,17 @@ public sealed class SqlWebApiExecutor(
                         cancellationToken);
                 }
 
-                var tokenResponse = JsonSerializer.Serialize(new { token });
                 return await LogAndReturnAsync(
-                    JsonResult(new { token }, StatusCodes.Status200OK),
+                    new SqlWebApiHttpResult(
+                        statusCode: StatusCodes.Status200OK,
+                        contentType: "text/plain",
+                        text: token),
                     service,
                     sqlExec,
                     requestBody,
                     timer,
                     StatusCodes.Status200OK,
-                    tokenResponse,
+                    token,
                     string.Empty,
                     cancellationToken,
                     token);

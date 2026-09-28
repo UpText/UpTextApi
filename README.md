@@ -709,12 +709,12 @@ If you create a procedure named `login_post`, `UpTextApi` can turn its result in
 POST /api/login
 ```
 
-If the procedure returns one row or a JSON object with claims, the API responds with:
+If the procedure returns one row or a JSON object with claims, the API responds with
+`200 OK` and `Content-Type: text/plain`. The response body is the raw JWT token,
+without JSON wrapping or quotation marks:
 
-```json
-{
-  "token": "..."
-}
+```text
+eyJ...eyJ...signature
 ```
 
 If the credentials do not match, return no rows. `UpTextApi` responds with `401 Unauthorized`
