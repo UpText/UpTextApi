@@ -371,6 +371,20 @@ public sealed class SqlWebApiExecutor(
                 string.Empty,
                 cancellationToken);
         }
+        catch (SecurityHeaderException ex)
+        {
+            LogExecutionError(ex, "Security header rejected while executing {Procedure}", command.CommandText);
+            return await LogAndReturnAsync(
+                ErrorResult(StatusCodes.Status401Unauthorized, "Missing or invalid security header"),
+                service,
+                command.CommandText,
+                requestBody,
+                timer,
+                StatusCodes.Status401Unauthorized,
+                "Missing or invalid security header",
+                ex.Message,
+                cancellationToken);
+        }
         catch (SqlException ex)
         {
             LogExecutionError(ex, "Sql exception while executing {Procedure}", command.CommandText);
@@ -531,7 +545,7 @@ public sealed class SqlWebApiExecutor(
                 var claimValue = JwtHelper.GetClaimValue(request, claimName, configuration);
                 if (string.IsNullOrWhiteSpace(claimValue))
                 {
-                    throw new InvalidOperationException("Missing or invalid security header");
+                    throw new SecurityHeaderException(claimName);
                 }
 
                 parameter.Value = claimValue;
@@ -967,4 +981,7 @@ public sealed class SqlWebApiExecutor(
             contentType: "application/json",
             text: JsonSerializer.Serialize(value));
     }
+
+    private sealed class SecurityHeaderException(string claimName)
+        : InvalidOperationException($"Missing or invalid security header for auth claim '{claimName}'.");
 }
