@@ -709,7 +709,11 @@ If you create a procedure named `login_post`, `UpTextApi` can turn its result in
 POST /api/login
 ```
 
-If the procedure returns one row or a JSON object with claims, the API responds with
+The procedure must return the user's stored Argon2id hash through
+`@passwordHash nvarchar(256) OUTPUT`, together with one row or a JSON object of
+claims. The API verifies the request's `password` against that hash before issuing
+a token. The output hash is removed before constructing claims or responses.
+After successful verification, the API responds with
 `200 OK` and `Content-Type: text/plain`. The response body is the raw JWT token,
 without JSON wrapping or quotation marks:
 
@@ -719,6 +723,75 @@ eyJ...eyJ...signature
 
 If the credentials do not match, return no rows. `UpTextApi` responds with `401 Unauthorized`
 and `{"message":"Invalid username or password"}`.
+
+#### Password storage and SQL login contract
+
+Registration and password-change procedures that accept `@passwordHash` receive an
+Argon2id hash derived automatically from the incoming `password`. Each hash uses a
+cryptographically random 16-byte salt, 19 MiB of memory, 2 iterations, parallelism 1,
+and a 32-byte result. The encoded value includes the algorithm, version, parameters,
+salt, and hash. Store it verbatim in a `varchar(256)` or `nvarchar(256)` column; no
+separate salt column or shared secret is needed. Client-supplied `passwordHash`
+values are ignored. A missing password supplies SQL NULL; creation procedures must
+reject it, and update procedures must handle it explicitly.
+
+`login_post` looks up the account by username and returns its stored hash, rather
+than comparing a newly calculated hash in SQL. Adapt table and column names to your
+database:
+
+```sql
+CREATE OR ALTER PROCEDURE api.login_post
+    @username nvarchar(200),
+    @passwordHash nvarchar(256) = NULL OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET @passwordHash = NULL;
+
+    SELECT @passwordHash = PasswordHash
+    FROM dbo.Users
+    WHERE Username = @username;
+
+    IF @passwordHash IS NULL RETURN 401;
+
+    SELECT Id AS userid, Username AS username
+    FROM dbo.Users
+    WHERE Username = @username;
+    RETURN 200;
+END;
+```
+
+Use a unique username constraint. Return only non-sensitive claims in the result
+row; never SELECT the password hash into the result set. The API initializes the
+output hash to NULL, verifies it after SQL completes, and rejects missing hashes,
+unsupported hash formats, wrong passwords, and unsuccessful SQL status codes.
+This lookup procedure runs **before** password verification: it must not record a
+successful login or perform privileged side effects. Send credentials in a JSON
+POST body over HTTPS, not in URLs.
+
+**Deployment/migration:** update the login procedure and widen password-hash columns
+and procedure parameters before deploying this version. Old SHA-256 hashes are not
+accepted and cannot be converted without the password. Existing accounts require a
+trusted password-reset flow that writes the new hash. Automatic legacy-hash migration
+is not implemented. Coordinate this change with registration and password-change
+procedures; old SQL hash-equality login procedures will no longer work.
+
+For the development `UpCrm` database, the reviewed migration is
+[`20260928_crm_argon2id.sql`](src/UpTextApi/Sql/Migrations/20260928_crm_argon2id.sql).
+It widens `crm.sales.PasswordHash` and the password parameters on
+`crmapi.tenants_post`, `crmapi.sales_post`, `crmapi.sales_Password_Put`, and
+`crmapi.Login_Post`. Login retains tenant and disabled-account checks and returns
+the stored hash as an output parameter. Password writes reject missing or
+non-Argon2id values. Run the script with a migration account during the API
+deployment; the application account does not have the required ALTER permissions.
+The script is transactional, checks for unexpected procedure changes, and preserves
+all existing password values. It does not migrate legacy passwords.
+
+Run the password-security checks with:
+
+```bash
+dotnet run --project tests/PasswordSecurity
+```
 
 ### 2. `@auth_*` parameters protect endpoints
 

@@ -144,7 +144,8 @@ public sealed class SqlWebApiExecutor(
 
         try
         {
-            ApplyParameters(command, request, id, requestBody, requestHeaders, requestJson);
+            ApplyParameters(command, request, id, requestBody, requestHeaders, requestJson,
+                string.Equals(procedureName, "login_post", StringComparison.OrdinalIgnoreCase));
             sqlExec = BuildSqlExecString(command);
 
             string? jsonData = null;
@@ -211,6 +212,15 @@ public sealed class SqlWebApiExecutor(
 
             statusCode = ResolveStatusCode(command);
 
+            var isLogin = string.Equals(procedureName, "login_post", StringComparison.OrdinalIgnoreCase);
+            if (isLogin && !LoginPasswordVerifier.VerifyAndRemoveHash(command, ReadPassword(request, requestJson), statusCode))
+            {
+                return await LogAndReturnAsync(
+                    ErrorResult(StatusCodes.Status401Unauthorized, "Invalid username or password"),
+                    service, sqlExec, requestBody, timer, StatusCodes.Status401Unauthorized,
+                    "Invalid username or password", "Invalid username or password", cancellationToken);
+            }
+
             if (statusCode < 299)
             {
                 var outputResult = BuildOutputPayload(command, jsonData, totalRows);
@@ -218,7 +228,7 @@ public sealed class SqlWebApiExecutor(
                 totalRows = outputResult.TotalRows;
             }
 
-            if (string.Equals(procedureName, "login_post", StringComparison.OrdinalIgnoreCase) &&
+            if (isLogin &&
                 responseBytes is null)
             {
                 var bodyForToken = responseText ?? jsonData;
@@ -475,7 +485,8 @@ public sealed class SqlWebApiExecutor(
         string? id,
         string requestBody,
         string requestHeaders,
-        JsonNode? requestJson)
+        JsonNode? requestJson,
+        bool isLogin)
     {
         SqlParameter[] cachedParameters;
         if (!memoryCache.TryGetValue(command.CommandText, out cachedParameters!))
@@ -556,11 +567,17 @@ public sealed class SqlWebApiExecutor(
 
             if (string.Equals(parameter.ParameterName, "@passwordHash", StringComparison.OrdinalIgnoreCase))
             {
-                var password = request.Query["password"].FirstOrDefault() ?? requestJson?["password"]?.ToString();
-                if (!string.IsNullOrWhiteSpace(password))
+                if (isLogin || parameter.Direction == ParameterDirection.Output)
                 {
-                    parameter.Value = UpHasher.HashPassword(password);
+                    parameter.Value = DBNull.Value;
+                    continue;
                 }
+
+                var password = ReadPassword(request, requestJson);
+                // Never trust a client-supplied hash, including one supplied without a password.
+                parameter.Value = !string.IsNullOrWhiteSpace(password)
+                    ? UpHasher.HashPassword(password)
+                    : DBNull.Value;
             }
 
             if (parameter.Direction is ParameterDirection.Input or ParameterDirection.InputOutput &&
@@ -571,6 +588,9 @@ public sealed class SqlWebApiExecutor(
         }
 
     }
+
+    private static string? ReadPassword(HttpRequest request, JsonNode? requestJson) =>
+        request.Query["password"].FirstOrDefault() ?? requestJson?["password"]?.ToString();
 
     private static void RemoveOptionalRangeAndSortParameters(SqlCommand command, IQueryCollection query)
     {

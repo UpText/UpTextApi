@@ -146,7 +146,7 @@ public static class ServiceOpenApi
 
                     var openApiParameter = new OpenApiParameter
                     {
-                        Name = param.Name.StartsWith('@') ? param.Name[1..] : param.Name,
+                        Name = NormalizeParameterName(param.Name),
                         In = ParameterLocation.Query,
                         Schema = CreateParameterSchema(param)
                     };
@@ -395,7 +395,10 @@ public static class ServiceOpenApi
 
     private static string NormalizeParameterName(string name)
     {
-        return name.StartsWith('@') ? name[1..] : name;
+        var parameterName = name.StartsWith('@') ? name[1..] : name;
+        return string.Equals(parameterName, "passwordHash", StringComparison.OrdinalIgnoreCase)
+            ? "password"
+            : parameterName;
     }
 
     private static bool UsesRequestBody(SqlOpenApiProcInfo proc)
