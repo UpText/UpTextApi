@@ -10,8 +10,6 @@ internal static class SqlOpenApiModelBuilder
 {
     public static SqlOpenApiModel ConstructModel(string connectionString, string schema)
     {
-        var model = new SqlOpenApiModel();
-
         using var connection = new SqlConnection(connectionString);
         using var command = connection.CreateCommand();
         command.CommandType = CommandType.Text;
@@ -36,30 +34,7 @@ internal static class SqlOpenApiModelBuilder
             adapter.Fill(table);
         }
 
-        foreach (DataRow row in table.Rows)
-        {
-            var procName = GetString(row, "ProcedureName");
-            var controller = GetControllerInfo(model, procName);
-            if (controller is null)
-            {
-                continue;
-            }
-
-            var proc = GetProcInfo(controller, procName);
-            var parameterName = GetString(row, "ParameterName");
-            if (parameterName != "<no params>")
-            {
-                proc.Parameters.Add(new SqlOpenApiParameterInfo
-                {
-                    Name = parameterName,
-                    Precision = GetInt32(row, "Precision"),
-                    Scale = GetInt32(row, "Scale"),
-                    MaxLen = GetInt32(row, "MaxLen"),
-                    SqlType = GetString(row, "SqlType"),
-                    IsOutput = GetString(row, "ParameterMode") != "IN"
-                });
-            }
-        }
+        var model = ConstructModelFromMetadata(table);
 
         foreach (var controller in model.Controllers)
         {
@@ -88,6 +63,38 @@ internal static class SqlOpenApiModelBuilder
                 {
                     ConstructUiUpdates(connection, controller, proc, schema);
                 }
+            }
+        }
+
+        return model;
+    }
+
+    internal static SqlOpenApiModel ConstructModelFromMetadata(DataTable table)
+    {
+        var model = new SqlOpenApiModel();
+
+        foreach (DataRow row in table.Rows)
+        {
+            var procName = GetString(row, "ProcedureName");
+            var controller = GetControllerInfo(model, procName);
+            if (controller is null)
+            {
+                continue;
+            }
+
+            var proc = GetProcInfo(controller, procName);
+            var parameterName = GetString(row, "ParameterName");
+            if (parameterName != "<no params>")
+            {
+                proc.Parameters.Add(new SqlOpenApiParameterInfo
+                {
+                    Name = parameterName,
+                    Precision = GetInt32(row, "Precision"),
+                    Scale = GetInt32(row, "Scale"),
+                    MaxLen = GetInt32(row, "MaxLen"),
+                    SqlType = GetString(row, "SqlType"),
+                    IsOutput = GetString(row, "ParameterMode") != "IN"
+                });
             }
         }
 
