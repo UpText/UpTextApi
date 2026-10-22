@@ -2,37 +2,101 @@ direction: down
 
 vars: {
   d2-config: {
-    pad: 20
+    pad: 48
+    center: true
   }
 }
 
-app: App {
-  shape: rectangle
-  style.fill: "#EAF5FF"
-  style.stroke: "#1670A5"
+style: {
+  fill: "#F8FAFC"
 }
 
 api: "UpTextApi\nREST API" {
-  style.fill: "#E6FAFC"
-  style.stroke: "#0891B2"
+  width: 280
+  height: 112
+  style: {
+    fill: "#102A43"
+    stroke: "#102A43"
+    font-color: "#FFFFFF"
+    font-size: 26
+    bold: true
+    border-radius: 18
+    shadow: true
+  }
+}
+
+app: "App\nWeb · mobile · integrations" {
+  width: 280
+  height: 112
+  style: {
+    fill: "#E6F8FC"
+    stroke: "#0891B2"
+    font-color: "#102A43"
+    font-size: 20
+    border-radius: 16
+    stroke-width: 2
+  }
 }
 
 sql: SQL Server {
   grid-rows: 1
-  style.fill: "#FFF7E6"
-  style.stroke: "#D69520"
-
-  procedures: Stored procedures {
-    shape: rectangle
-    tooltip: Stored and executed inside SQL Server
+  grid-gap: 140
+  style: {
+    fill: "#FFF8EB"
+    stroke: "#D9A441"
+    font-color: "#102A43"
+    font-size: 24
+    bold: true
+    border-radius: 20
+    stroke-width: 2
   }
 
-  tables: Tables / data {
+  procedures: "Stored procedures\nBusiness logic" {
+    width: 210
+    height: 100
+    style: {
+      fill: "#FFFFFF"
+      stroke: "#D9A441"
+      font-color: "#102A43"
+      font-size: 18
+      border-radius: 12
+    }
+  }
+
+  tables: "Tables / data" {
     shape: cylinder
+    width: 180
+    height: 100
+    style: {
+      fill: "#FFF0CC"
+      stroke: "#D9A441"
+      font-color: "#102A43"
+      font-size: 18
+    }
   }
 
-  procedures <-> tables: Read / write
+  procedures <-> tables: Read / write {
+    style: {
+      stroke: "#B98222"
+      font-color: "#795516"
+      font-size: 16
+    }
+  }
 }
 
-app <-> api: "HTTP / JSON"
-api <-> sql.procedures: "SQL: parameters / results"
+api <-> app: "HTTP / JSON\nRequests & responses" {
+  style: {
+    stroke: "#0891B2"
+    stroke-width: 2
+    font-color: "#0E7490"
+    font-size: 18
+  }
+}
+api <-> sql: "SQL\nParameters & results" {
+  style: {
+    stroke: "#B98222"
+    stroke-width: 2
+    font-color: "#795516"
+    font-size: 18
+  }
+}
