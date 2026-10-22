@@ -9,8 +9,11 @@ You define your API in SQL, not in controllers:
 - Run the app as a container from Docker Hub or from source
 - Get REST endpoints, JWT protection, OpenAPI, and Swagger UI automatically
 - Genereate CRUD procedures from your tables
-- I production 
-It is built for teams that want a simple SQL-first API layer with very little moving code.
+
+
+It is built for developers that want a simple SQL-first API layer with very little moving code.
+
+If you now SQL and your database this tool is for you.
 
 ## What It Gives You
 
