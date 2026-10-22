@@ -8,14 +8,15 @@ You define your API in SQL, not in controllers:
 - Point `UpTextApi` at a SQL Server database and schema
 - Run the app as a container from Docker Hub or from source
 - Get REST endpoints, JWT protection, OpenAPI, and Swagger UI automatically
-
+- Genereate CRUD procedures from your tables
+- I production 
 It is built for teams that want a simple SQL-first API layer with very little moving code.
 
 ## What It Gives You
 
 - SQL-first REST API generation from stored procedures
 - SQL Server support
-- All resources are defined in SQL
+- All REST resources are defined in SQL
 - Run from the `uptext/uptextapi` Docker image
 - Run from source with `dotnet run`
 - Automatic OpenAPI generation per service
@@ -25,8 +26,23 @@ It is built for teams that want a simple SQL-first API layer with very little mo
 - Paging and sorting support through stored procedure parameters
 - Binary/file responses from SQL
 - Multi-service support through configuration
+- Use different SQL Schema for your data and procedures
+- Create an api-user on SQL Server that can only execute stored procedures in a given schema
 
 ## How It Works
+
+![App communicating with UpTextApi using JSON over HTTP, and UpTextApi executing stored procedures stored inside SQL Server](docs/diagrams/architecture.svg)
+
+The app sends HTTP requests to UpTextApi, including a JSON body when needed.
+UpTextApi passes request values as parameters to stored procedures stored and
+executed inside SQL Server. The procedures read or write table data, and
+UpTextApi converts the database results into JSON responses for the app.
+
+The [D2 diagram source](docs/diagrams/architecture.d2) can be edited and rendered with:
+
+```sh
+d2 docs/diagrams/architecture.d2 docs/diagrams/architecture.svg
+```
 
 `UpTextApi` maps HTTP verbs to stored procedure names:
 
@@ -66,11 +82,11 @@ Thus many api's can be hosted by a single container. Also the service user shoul
 
 ## Project Layout
 
-- [`src/UpTextApi/Program.cs`](/Users/ole/UpText/Repos/UpTextApi/src/UpTextApi/Program.cs) bootstraps the API
-- [`src/UpTextApi/Endpoints/SqlWebApi.cs`](/Users/ole/UpText/Repos/UpTextApi/src/UpTextApi/Endpoints/SqlWebApi.cs) exposes the SQL-backed REST endpoints
-- [`src/UpTextApi/Endpoints/ServiceOpenApi.cs`](/Users/ole/UpText/Repos/UpTextApi/src/UpTextApi/Endpoints/ServiceOpenApi.cs) generates service-specific OpenAPI
-- [`src/UpTextApi/Endpoints/SwaggerUi.cs`](/Users/ole/UpText/Repos/UpTextApi/src/UpTextApi/Endpoints/SwaggerUi.cs) serves Swagger UI
-- [`src/UpTextApi/Endpoints/SqlGenFunc.cs`](/Users/ole/UpText/Repos/UpTextApi/src/UpTextApi/Endpoints/SqlGenFunc.cs) can generate CRUD stored procedure templates
+- [`src/UpTextApi/Program.cs`](src/UpTextApi/Program.cs) bootstraps the API
+- [`src/UpTextApi/Endpoints/SqlWebApi.cs`](src/UpTextApi/Endpoints/SqlWebApi.cs) exposes the SQL-backed REST endpoints
+- [`src/UpTextApi/Endpoints/ServiceOpenApi.cs`](src/UpTextApi/Endpoints/ServiceOpenApi.cs) generates service-specific OpenAPI
+- [`src/UpTextApi/Endpoints/SwaggerUi.cs`](src/UpTextApi/Endpoints/SwaggerUi.cs) serves Swagger UI
+- [`src/UpTextApi/Endpoints/SqlGenFunc.cs`](src/UpTextApi/Endpoints/SqlGenFunc.cs) can generate CRUD stored procedure templates
 
 ## Quick Start
 
@@ -111,7 +127,7 @@ Useful built-in routes:
 
 ### 2. Configure a service
 
-For containers, the recommended approach is environment variables. If you run from source, you can also use [`src/UpTextApi/appsettings.json`](/Users/ole/UpText/Repos/UpTextApi/src/UpTextApi/appsettings.json).
+For containers, the recommended approach is environment variables. If you run from source, you can also use [`src/UpTextApi/appsettings.json`](src/UpTextApi/appsettings.json).
 
 Minimal configuration example:
 
@@ -163,8 +179,8 @@ CORS is now fully configuration-driven.
 
 Set allowed origins in:
 
-- [`src/UpTextApi/appsettings.Development.json`](/Users/ole/UpText/Repos/UpTextApi/src/UpTextApi/appsettings.Development.json) for local development
-- [`src/UpTextApi/appsettings.json`](/Users/ole/UpText/Repos/UpTextApi/src/UpTextApi/appsettings.json) or environment variables for shared environments and containers
+- [`src/UpTextApi/appsettings.Development.json`](src/UpTextApi/appsettings.Development.json) for local development
+- [`src/UpTextApi/appsettings.json`](src/UpTextApi/appsettings.json) or environment variables for shared environments and containers
 
 Example:
 
@@ -304,7 +320,7 @@ CREATE SCHEMA api AUTHORIZATION dbo;
 CREATE USER upservice FOR LOGIN upservice;
 GRANT CONNECT TO upservice;
 GRANT EXECUTE ON SCHEMA::[api] TO upservice;
-GRANT INSERT ON [api].[log] TO upservice;
+GRANT SELECT, INSERT, UPDATE, DELETE ON [api].[log] TO upservice;
 ```
 
 This matches the example connection string above and gives `UpTextApi` access to execute procedures in the `api` schema and write to `api.log` without broader database permissions.
@@ -717,9 +733,6 @@ After successful verification, the API responds with
 `200 OK` and `Content-Type: text/plain`. The response body is the raw JWT token,
 without JSON wrapping or quotation marks:
 
-```text
-eyJ...eyJ...signature
-```
 
 If the credentials do not match, return no rows. `UpTextApi` responds with `401 Unauthorized`
 and `{"message":"Invalid username or password"}`.
@@ -884,7 +897,7 @@ FROM (VALUES
 GO
 ```
 
-For the full shape, see [`src/UpTextApi/Docs/ServiceOpenApi.md`](/Users/ole/UpText/Repos/UpTextApi/src/UpTextApi/Docs/ServiceOpenApi.md).
+For the full shape, see [`src/UpTextApi/Docs/ServiceOpenApi.md`](src/UpTextApi/Docs/ServiceOpenApi.md).
 
 ## SQL Generator
 
@@ -988,20 +1001,20 @@ Most users should run `UpTextApi` from Docker Hub. Running from source is mainly
 Run directly with the .NET SDK:
 
 ```bash
-dotnet run --project /Users/ole/UpText/Repos/UpTextApi/src/UpTextApi/UpTextApi.csproj
+dotnet run --project "$HOME/UpText/Repos/UpTextApi/src/UpTextApi/UpTextApi.csproj"
 ```
 
 Build the container locally instead of pulling `uptext/uptextapi`:
 
 ```bash
-docker build -f /Users/ole/UpText/Repos/UpTextApi/src/UpTextApi/Dockerfile -t uptextapi /Users/ole/UpText/Repos/UpTextApi/src
+docker build -f "$HOME/UpText/Repos/UpTextApi/src/UpTextApi/Dockerfile" -t uptextapi "$HOME/UpText/Repos/UpTextApi/src"
 ```
 
 Configuration can come from:
 
 - environment variables
-- [`src/UpTextApi/appsettings.json`](/Users/ole/UpText/Repos/UpTextApi/src/UpTextApi/appsettings.json)
-- [`src/UpTextApi/appsettings.Development.json`](/Users/ole/UpText/Repos/UpTextApi/src/UpTextApi/appsettings.Development.json)
+- [`src/UpTextApi/appsettings.json`](src/UpTextApi/appsettings.json)
+- [`src/UpTextApi/appsettings.Development.json`](src/UpTextApi/appsettings.Development.json)
 
 ## Next Things To Add
 
