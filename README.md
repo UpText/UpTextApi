@@ -31,7 +31,7 @@ It is built for teams that want a simple SQL-first API layer with very little mo
 
 ## How It Works
 
-![App communicating with UpTextApi using JSON over HTTP, and UpTextApi executing stored procedures stored inside SQL Server](docs/diagrams/architecture.svg)
+![App communicating with UpTextApi using JSON over HTTP, and UpTextApi executing stored procedures stored inside SQL Server](docs/diagrams/architecture.png)
 
 The app sends HTTP requests to UpTextApi, including a JSON body when needed.
 UpTextApi passes request values as parameters to stored procedures stored and
@@ -42,6 +42,7 @@ The [D2 diagram source](docs/diagrams/architecture.d2) can be edited and rendere
 
 ```sh
 d2 docs/diagrams/architecture.d2 docs/diagrams/architecture.svg
+d2 docs/diagrams/architecture.d2 docs/diagrams/architecture.png
 ```
 
 `UpTextApi` maps HTTP verbs to stored procedure names:
