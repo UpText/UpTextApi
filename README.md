@@ -10,15 +10,18 @@ You define your API in SQL, not in controllers:
 - Get REST endpoints, JWT protection, OpenAPI, and Swagger UI automatically
 - Genereate CRUD procedures from your tables
 
-
 It is built for developers that want a simple SQL-first API layer with very little moving code.
 
 If you now SQL and your database this tool is for you.
 
 ## What It Gives You
 
-- SQL-first REST API generation from stored procedures
-- SQL Server support
+- SQL-first REST API from stored procedures
+- Use your SQL editor to develop the API
+- Avoid dynamic SQL generated in the API code
+- Control the SQL hitting your database
+- Find and solve problems fast by checking procedure performance 
+- SQL Server native support
 - All REST resources are defined in SQL
 - Run from the `uptext/uptextapi` Docker image
 - Run from source with `dotnet run`
@@ -29,24 +32,20 @@ If you now SQL and your database this tool is for you.
 - Paging and sorting support through stored procedure parameters
 - Binary/file responses from SQL
 - Multi-service support through configuration
-- Use different SQL Schema for your data and procedures
+- Better security by using different SQL Schema for your data and procedures
 - Create an api-user on SQL Server that can only execute stored procedures in a given schema
 
 ## How It Works
 
-![App communicating with UpTextApi using JSON over HTTP, and UpTextApi executing stored procedures stored inside SQL Server](docs/diagrams/architecture.png)
+<img src="docs/diagrams/architecture.png" alt="App communicating with UpTextApi using JSON over HTTP, and UpTextApi executing stored procedures stored inside SQL Server" width="500">
 
-The app sends HTTP requests to UpTextApi, including a JSON body when needed.
-UpTextApi passes request values as parameters to stored procedures stored and
-executed inside SQL Server. The procedures read or write table data, and
-UpTextApi converts the database results into JSON responses for the app.
+This diagram shows how most business applications work. There is an app talking to an api over the internet using the http protocol and json. 
+The api is normally a custom app. Here we just use UpTextApi and just write the stored procedures. 
+This is safer, faster and we can use our sql knowledge. It is safer because the  Api needs only access to execute stored procedures. You are in complete control of the SQL being used. We eliminate the dynamic sql often generated in the api layer. 
+Use your existing SQL editor and  workflow.
+In production you can trace the performance on each call. 
 
-The [D2 diagram source](docs/diagrams/architecture.d2) can be edited and rendered with:
 
-```sh
-d2 docs/diagrams/architecture.d2 docs/diagrams/architecture.svg
-d2 docs/diagrams/architecture.d2 docs/diagrams/architecture.png
-```
 
 `UpTextApi` maps HTTP verbs to stored procedure names:
 
@@ -77,6 +76,50 @@ Example:
 ```
 
 Thus many api's can be hosted by a single container. Also the service user should only have exec permission on the api schema. 
+
+## UpTextApi In A Real App: UpTextCRM
+
+UpTextCRM shows how UpTextApi can serve as the backend for a complete CRM
+application, with companies, contacts, deals, tasks, and notes. Its React frontend
+calls the `crmapi` service over HTTP, and UpTextApi executes the corresponding
+SQL Server stored procedures. CRM tables live in the `crm` schema, while API
+procedures live in `crmapi`.
+
+Try the [UpTextCRM app](https://crm.uptext.com) using demo / demo@local.com / demo123+
+
+[UpTextApi home page](https://api.uptext.com) to explore the API tools. The HomeKey is DemoKey
+
+### Multi-Tenant Architecture
+
+Multiple organizations use the same application, API, and database. Shared CRM
+tables carry a `tenant` value, and each tenant has its own users, configuration,
+and CRM records.
+
+At login, the user supplies a tenant and credentials. The login procedure checks
+the account within that tenant, and UpTextApi issues a JWT containing the returned
+identity claims. On authenticated requests, UpTextApi maps token claims to
+procedure parameters such as `@auth_tenant`. CRM procedures use that value to
+scope reads and writes to the signed-in tenant. For example, the contacts query
+filters with `WHERE tenant = @auth_tenant`.
+
+Tenant separation is therefore enforced by the SQL procedures using authenticated
+claims. New procedures must apply the same tenant checks, including when looking
+up related records.
+
+### API Home Page And Developer Tools
+
+The API home page provides a starting point for the configured services:
+
+- **Logs**: view call and error totals, follow links to filtered log entries, and
+  inspect request details, responses, SQL execution times, and errors.
+- **Code generation**: generate starter CRUD stored procedures from SQL tables,
+  then adapt them to the CRM's business rules and tenant checks.
+- **Swagger UI**: browse the generated API documentation and try requests against
+  the service, including authenticated endpoints with a bearer token.
+
+Available tools depend on the deployment configuration. When a HomeKey is
+configured, enter it on the home page to access logs, generation, and Swagger.
+CRM endpoints use their own JWT authentication.
 
 ## Requirements
 
@@ -1029,3 +1072,39 @@ Good additions for this project could be:
 - a production deployment example
 - example login/auth SQL scripts
 - integration tests for the CRUD flow
+
+## Running The UpTextCrm Stack With Docker Compose
+
+The [UpCrmCompose project](https://github.com/UpText/UpCrmCompose) brings together:
+
+- **UpTextCRM**: the browser frontend, using the `uptext/uptextcrm` image.
+- **UpTextApi**: the REST API, using the `uptext/uptextapi` image.
+- **SQL Server**: the CRM database, with persistent storage.
+- **Database initialization**: a one-shot container that publishes the CRM database
+  package (`dacpac`), configures the API database user, and seeds initial tenants.
+
+With Git and Docker Compose installed, clone the repository and enter its directory:
+
+```bash
+git clone https://github.com/UpText/UpCrmCompose.git
+cd UpCrmCompose
+```
+
+Copy the example configuration:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` to set passwords, the JWT secret, and public URLs, and set unused ports, then start the stack
+from the `UpCrmCompose` directory:
+
+```bash
+docker compose up --build -d
+```
+
+Compose waits for SQL Server to become healthy and for database initialization to
+complete before starting the API. Configuration connects the frontend to the API
+and the API to SQL Server. An override also supports an existing SQL Server.
+
+Please refer to the local README.md for more information.
