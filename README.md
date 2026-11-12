@@ -35,6 +35,7 @@ If you now SQL and your database this tool is for you.
 - Better security by using different SQL Schema for your data and procedures
 - Create an api-user on SQL Server that can only execute stored procedures in a given schema
 
+A real world CRM app is 
 ## How It Works
 
 <img src="docs/diagrams/architecture.png" alt="App communicating with UpTextApi using JSON over HTTP, and UpTextApi executing stored procedures stored inside SQL Server" width="500">
@@ -77,7 +78,7 @@ Example:
 
 Thus many api's can be hosted by a single container. Also the service user should only have exec permission on the api schema. 
 
-## UpTextApi In A Real App: UpTextCRM
+## Proof of concept: UpTextCRM powered by UpTextApi
 
 UpTextCRM shows how UpTextApi can serve as the backend for a complete CRM
 application, with companies, contacts, deals, tasks, and notes. Its React frontend
@@ -85,7 +86,7 @@ calls the `crmapi` service over HTTP, and UpTextApi executes the corresponding
 SQL Server stored procedures. CRM tables live in the `crm` schema, while API
 procedures live in `crmapi`.
 
-Try the [UpTextCRM app](https://crm.uptext.com) using demo / demo@local.com / demo123+
+Try the [UpTextCRM app](https://crm.uptext.com/#login/demox/demo@local.com) using demo / demo@local.com / demo123+
 
 [UpTextApi home page](https://api.uptext.com) to explore the API tools. The HomeKey is DemoKey
 

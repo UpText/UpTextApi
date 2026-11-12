@@ -10,6 +10,19 @@ public class SqlLogTests
     private const string InvalidConnectionString = "UnsupportedSqlLogTestKeyword=value";
     private static readonly SqlLogEntry Entry = new("test-api", "12", 200, "{}", "{}", "", "", "");
 
+    [Test]
+    public async Task LogAsync_WhenAlreadyCanceled_SkipsConnectionAndWarning()
+    {
+        var logger = new RecordingLogger();
+        var log = Create(new SqlLogOptions { ConnectionString = InvalidConnectionString }, logger);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await log.LogAsync(Entry, cancellation.Token);
+
+        Assert.That(logger.Entries, Is.Empty);
+    }
+
     [TestCase(null)]
     [TestCase("")]
     [TestCase(" \t")]

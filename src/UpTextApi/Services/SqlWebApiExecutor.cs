@@ -64,6 +64,38 @@ public sealed class SqlWebApiExecutor(
         string? details,
         CancellationToken cancellationToken)
     {
+        SqlLogEntry? entry = null;
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var result = await ExecuteCoreAsync(request, service, resource, id, details,
+                cancellationToken, value => entry = value);
+            // ExecuteCoreAsync has disposed the reader, command and query connection.
+            // Never hold a query-pool slot while waiting for the logging pool.
+            if (entry is not null && !cancellationToken.IsCancellationRequested)
+            {
+                await sqlLog.LogAsync(entry, cancellationToken);
+            }
+            return result;
+        }
+        catch (Exception ex) when (cancellationToken.IsCancellationRequested &&
+                                   ex is OperationCanceledException or SqlException)
+        {
+            logger.LogDebug("Request canceled while executing {Service}.{Resource}", service, resource);
+            // The client is gone; do not write a response body or try a SQL log insert.
+            return Results.StatusCode(499);
+        }
+    }
+
+    private async Task<IResult> ExecuteCoreAsync(
+        HttpRequest request,
+        string service,
+        string resource,
+        string? id,
+        string? details,
+        CancellationToken cancellationToken,
+        Action<SqlLogEntry> recordLog)
+    {
         var method = request.Method.ToLowerInvariant();
         var timer = Stopwatch.StartNew();
 
@@ -132,8 +164,6 @@ public sealed class SqlWebApiExecutor(
 
         await using var connection = new SqlConnection(connectionString);
         connection.InfoMessage += (_, args) => logger.LogInformation("PRINT:{Message}", args.Message);
-        await connection.OpenAsync(cancellationToken);
-
         await using var command = new SqlCommand
         {
             Connection = connection,
@@ -141,9 +171,13 @@ public sealed class SqlWebApiExecutor(
             CommandType = CommandType.StoredProcedure
         };
         var sqlExec = command.CommandText;
+        var connectionOpened = false;
 
         try
         {
+            await connection.OpenAsync(cancellationToken);
+            connectionOpened = true;
+            cancellationToken.ThrowIfCancellationRequested();
             ApplyParameters(command, request, id, requestBody, requestHeaders, requestJson,
                 string.Equals(procedureName, "login_post", StringComparison.OrdinalIgnoreCase));
             sqlExec = BuildSqlExecString(command);
@@ -158,19 +192,15 @@ public sealed class SqlWebApiExecutor(
             int? totalRows = 0;
 
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            if (reader.HasRows)
+            if (await reader.ReadAsync(cancellationToken))
             {
                 if (reader.FieldCount == 1 && string.Equals(reader.GetName(0), "json", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (await reader.ReadAsync(cancellationToken))
-                    {
-                        jsonData = reader.GetValue(0)?.ToString();
-                    }
+                    jsonData = reader.GetValue(0)?.ToString();
                 }
                 else
                 {
-                    var dataTable = new DataTable();
-                    dataTable.Load(reader);
+                    var dataTable = await ReadTableAsync(reader, cancellationToken, firstRowAvailable: true);
 
                     if (dataTable.Columns.Count == 1 && dataTable.Rows.Count == 1)
                     {
@@ -208,6 +238,11 @@ public sealed class SqlWebApiExecutor(
                 totalRows = 0;
             }
 
+            // Drain additional results asynchronously so output/return parameters are available.
+            while (await reader.NextResultAsync(cancellationToken))
+            {
+                while (await reader.ReadAsync(cancellationToken)) { }
+            }
             await reader.CloseAsync();
 
             statusCode = ResolveStatusCode(command);
@@ -397,9 +432,14 @@ public sealed class SqlWebApiExecutor(
                 ex.Message,
                 cancellationToken);
         }
-        catch (SqlException ex)
+        catch (SqlException ex) when (!cancellationToken.IsCancellationRequested)
         {
             LogExecutionError(ex, "Sql exception while executing {Procedure}", command.CommandText);
+            if (!connectionOpened)
+            {
+                // Do not open another SQL connection to log a failed connection attempt.
+                return ErrorResult(StatusCodes.Status503ServiceUnavailable, "Database unavailable");
+            }
             var statusCode = ResolveStatusCode(command);
             if (statusCode < 400)
             {
@@ -419,7 +459,8 @@ public sealed class SqlWebApiExecutor(
                 statusCode >= 500 ? errorText : string.Empty,
                 cancellationToken);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!(cancellationToken.IsCancellationRequested &&
+                                          ex is OperationCanceledException or SqlException))
         {
             LogExecutionError(ex, "Unhandled exception while executing {Procedure}", command.CommandText);
             return await LogAndReturnAsync(
@@ -433,6 +474,38 @@ public sealed class SqlWebApiExecutor(
                 ex.Message,
                 cancellationToken);
         }
+
+        Task<IResult> LogAndReturnAsync(
+            IResult result,
+            string service,
+            string execString,
+            string requestBody,
+            Stopwatch timer,
+            int statusCode,
+            string returnBody,
+            string unexpectedError,
+            CancellationToken cancellationToken,
+            string jwt = "")
+        {
+            if (!timer.IsRunning)
+            {
+                return Task.FromResult(result);
+            }
+
+            timer.Stop();
+            recordLog(
+                new SqlLogEntry(
+                    ApiName: service,
+                    MsUsed: timer.ElapsedMilliseconds.ToString(),
+                    ReturnValue: statusCode,
+                    RequestBody: RedactSensitiveRequestBody(requestBody),
+                    ReturnBody: returnBody,
+                    ExecString: execString,
+                    Jwt: jwt,
+                    UnexpectedError: unexpectedError));
+
+            return Task.FromResult(result);
+        }
     }
 
     private void LogExecutionError(Exception ex, string messageTemplate, string procedure)
@@ -444,39 +517,6 @@ public sealed class SqlWebApiExecutor(
         }
 
         logger.LogError("{Message}. Procedure={Procedure}. Error={Error}", messageTemplate.Replace("{Procedure}", procedure), procedure, ex.Message);
-    }
-
-    private async Task<IResult> LogAndReturnAsync(
-        IResult result,
-        string service,
-        string execString,
-        string requestBody,
-        Stopwatch timer,
-        int statusCode,
-        string returnBody,
-        string unexpectedError,
-        CancellationToken cancellationToken,
-        string jwt = "")
-    {
-        if (!timer.IsRunning)
-        {
-            return result;
-        }
-
-        timer.Stop();
-        await sqlLog.LogAsync(
-            new SqlLogEntry(
-                ApiName: service,
-                MsUsed: timer.ElapsedMilliseconds.ToString(),
-                ReturnValue: statusCode,
-                RequestBody: RedactSensitiveRequestBody(requestBody),
-                ReturnBody: returnBody,
-                ExecString: execString,
-                Jwt: jwt,
-                UnexpectedError: unexpectedError),
-            cancellationToken);
-
-        return result;
     }
 
     private void ApplyParameters(
@@ -700,6 +740,26 @@ public sealed class SqlWebApiExecutor(
         }
 
         return clone;
+    }
+
+    internal static async Task<DataTable> ReadTableAsync(DbDataReader reader, CancellationToken cancellationToken, bool firstRowAvailable = false)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var table = new DataTable();
+        for (var index = 0; index < reader.FieldCount; index++)
+        {
+            table.Columns.Add(reader.GetName(index), reader.GetFieldType(index));
+        }
+        var hasRow = firstRowAvailable || await reader.ReadAsync(cancellationToken);
+        while (hasRow)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var values = new object[reader.FieldCount];
+            reader.GetValues(values);
+            table.Rows.Add(values);
+            hasRow = await reader.ReadAsync(cancellationToken);
+        }
+        return table;
     }
 
     private static string SerializeDataTable(DataTable table)

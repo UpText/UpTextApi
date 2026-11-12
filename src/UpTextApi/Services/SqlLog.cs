@@ -89,6 +89,8 @@ END;
 
     public async Task LogAsync(SqlLogEntry entry, CancellationToken cancellationToken = default)
     {
+        if (cancellationToken.IsCancellationRequested) return;
+
         if (!TryGetValidatedIdentifiers(out var schema, out var tableName))
         {
             return;
@@ -118,6 +120,11 @@ VALUES
             command.Parameters.AddWithValue("@UnexpectedError", ToDbValue(entry.UnexpectedError));
             await command.ExecuteNonQueryAsync(cancellationToken);
             WriteConsoleLine(entry, schema, tableName);
+        }
+        catch (Exception ex) when (cancellationToken.IsCancellationRequested &&
+                                   ex is OperationCanceledException or SqlException)
+        {
+            logger.LogDebug("SQL log write canceled for {ApiName}", entry.ApiName);
         }
         catch (Exception ex)
         {
