@@ -1,3 +1,5 @@
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.RateLimiting;
 using UpTextApi.Endpoints;
 using UpTextApi.Configuration;
 using UpTextApi.Services;
@@ -51,6 +53,19 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
 });
 builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<EntraStore>();
+builder.Services.AddSingleton<EntraSecretStore>();
+builder.Services.AddSingleton<EntraLoginState>();
+builder.Services.AddSingleton<EntraIdentityValidator>();
+builder.Services.AddHttpClient("Entra", client => client.Timeout = TimeSpan.FromSeconds(20))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = 429;
+    options.AddPolicy("entra", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 60, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+});
 builder.Services.AddHealthChecks()
     .AddCheck<ConfigurationHealthCheck>("configuration", tags: ["ready"])
     .AddCheck<SqlServicesHealthCheck>("sql", tags: ["ready"]);
@@ -132,6 +147,25 @@ app.Use(async (context, next) =>
     await next(context);
 });
 
+app.UseRateLimiter();
+app.Use(async (context, next) =>
+{
+    if (JwtHelper.GetClaimValue(context.Request, "auth_provider", app.Configuration) == "entra")
+    {
+        try
+        {
+            var store = context.RequestServices.GetRequiredService<EntraStore>();
+            var user = await EntraLogin.Actor(context.Request, store, app.Configuration, context.RequestAborted);
+            var routeService = context.Request.RouteValues["service"]?.ToString();
+            if (user is null || (routeService is not null && !string.Equals(routeService, store.ServiceName, StringComparison.OrdinalIgnoreCase)))
+            { context.Response.StatusCode = 401; return; }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        { context.Response.StatusCode = 503; return; }
+    }
+    await next(context);
+});
+app.MapEntraLogin();
 app.MapPing();
 app.MapHealth();
 app.MapFavicon();

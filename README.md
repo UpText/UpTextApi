@@ -1109,3 +1109,7 @@ complete before starting the API. Configuration connects the frontend to the API
 and the API to SQL Server. An override also supports an existing SQL Server.
 
 Please refer to the local README.md for more information.
+
+## Microsoft Entra login
+
+See [Entra login setup](docs/entra-login.md) for tenant-admin settings, invite-only provisioning, and deployment prerequisites.

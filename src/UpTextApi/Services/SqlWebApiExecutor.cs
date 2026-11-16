@@ -122,6 +122,22 @@ public sealed class SqlWebApiExecutor(
             id = null;
         }
 
+        if (string.Equals(sqlSchema, "crmapi", StringComparison.OrdinalIgnoreCase) && string.Equals(resource, "configuration", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPut(request.Method))
+        {
+            request.EnableBuffering();
+            try
+            {
+                using var document = await JsonDocument.ParseAsync(request.Body, cancellationToken: cancellationToken);
+                var configNode = document.RootElement.GetProperty("config");
+                var settings = EntraSettings.Read(configNode.ValueKind == JsonValueKind.String ? configNode.GetString() : configNode.GetRawText());
+                if (settings.Enabled || !string.IsNullOrEmpty(settings.ClientSecretUri))
+                    EntraSecretStore.ValidateReference(settings.ClientSecretUri, configuration.GetSection("Entra:AllowedKeyVaults").Get<string[]>() ?? []);
+            }
+            catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException)
+            { return ErrorResult(400, "Invalid Entra settings. Use valid directory/client IDs, an approved Key Vault secret URI and invite_only or automatic provisioning."); }
+            finally { request.Body.Position = 0; }
+        }
+
         var hasIdPath = !string.IsNullOrWhiteSpace(id);
         var procedureName = details is null
             ? $"{resource}_{method}"
@@ -499,9 +515,9 @@ public sealed class SqlWebApiExecutor(
                     MsUsed: timer.ElapsedMilliseconds.ToString(),
                     ReturnValue: statusCode,
                     RequestBody: RedactSensitiveRequestBody(requestBody),
-                    ReturnBody: returnBody,
+                    ReturnBody: string.IsNullOrEmpty(jwt) ? returnBody : RedactedValue,
                     ExecString: execString,
-                    Jwt: jwt,
+                    Jwt: string.IsNullOrEmpty(jwt) ? "" : RedactedValue,
                     UnexpectedError: unexpectedError));
 
             return Task.FromResult(result);
