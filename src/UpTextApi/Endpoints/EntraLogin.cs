@@ -22,12 +22,13 @@ public static class EntraLogin
             context.HttpContext.Response.Headers.Pragma = "no-cache";
             context.HttpContext.Response.Headers["Referrer-Policy"] = "no-referrer";
             try { return await next(context); }
-            catch (SqlException ex) when (ex.Number is 50001 or 50002 or 50003 or 50004 or 2601 or 2627)
+            catch (SqlException ex) when (ex.Number is 50001 or 50002 or 50003 or 50004 or 50005 or 2601 or 2627)
             {
                 var message = ex.Number switch {
                     50001 => "Tenant administrator required.",
                     50002 => "Save valid Entra directory and client settings first.",
                     50003 => "Active CRM user not found in this tenant.",
+                    50005 => "Settings changed during consent. Restart from tenant settings.",
                     50004 => "Identity already invited or linked. Revoke it before replacing it.",
                     _ => "A CRM account already exists. Enter its CRM user ID to explicitly link it."
                 };
@@ -39,6 +40,7 @@ public static class EntraLogin
                 return Results.Problem("Unable to complete Entra authentication. Check configuration or contact your administrator.", statusCode: 400);
             }
         });
+        group.MapEntraOnboarding();
         group.MapGet("/options", async (string tenant, EntraStore store, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(tenant) || tenant.Length > 255) return Results.BadRequest();

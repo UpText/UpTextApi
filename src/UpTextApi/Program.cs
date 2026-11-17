@@ -56,6 +56,7 @@ builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<EntraStore>();
 builder.Services.AddSingleton<EntraSecretStore>();
 builder.Services.AddSingleton<EntraLoginState>();
+builder.Services.AddSingleton<EntraOnboardingState>();
 builder.Services.AddSingleton<EntraIdentityValidator>();
 builder.Services.AddHttpClient("Entra", client => client.Timeout = TimeSpan.FromSeconds(20))
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });

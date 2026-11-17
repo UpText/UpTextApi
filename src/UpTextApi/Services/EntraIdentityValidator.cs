@@ -9,7 +9,7 @@ namespace UpTextApi.Services;
 
 public sealed class EntraIdentityValidator(IMemoryCache cache)
 {
-    public async Task<ClaimsPrincipal> Validate(string token, EntraSettings settings, string nonce, CancellationToken ct)
+    public async Task<ClaimsPrincipal> Validate(string token, EntraSettings settings, string? nonce, CancellationToken ct)
     {
         var directory = Guid.Parse(settings.DirectoryId).ToString();
         var issuer = $"https://login.microsoftonline.com/{directory}/v2.0";
@@ -28,7 +28,7 @@ public sealed class EntraIdentityValidator(IMemoryCache cache)
         }
     }
 
-    internal static ClaimsPrincipal ValidateToken(string token, EntraSettings settings, string nonce, IEnumerable<SecurityKey> keys)
+    internal static ClaimsPrincipal ValidateToken(string token, EntraSettings settings, string? nonce, IEnumerable<SecurityKey> keys)
     {
         var handler = new JwtSecurityTokenHandler { MapInboundClaims = false };
         var parameters = new TokenValidationParameters
@@ -44,9 +44,16 @@ public sealed class EntraIdentityValidator(IMemoryCache cache)
         return principal;
     }
 
-    internal static void ValidateClaims(ClaimsPrincipal principal, EntraSettings settings, string nonce)
+    internal static void ValidateConnectionPermission(ClaimsPrincipal principal, string objectId, string clientId)
     {
-        if (principal.FindFirst("nonce")?.Value != nonce ||
+        if (principal.FindFirst("oid")?.Value != objectId || principal.FindFirst("azp")?.Value != clientId ||
+            !(principal.FindFirst("scp")?.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains("CRM.Connect") ?? false))
+            throw new SecurityTokenValidationException("Missing administrator-consented CRM connection permission.");
+    }
+
+    internal static void ValidateClaims(ClaimsPrincipal principal, EntraSettings settings, string? nonce)
+    {
+        if ((nonce is not null && principal.FindFirst("nonce")?.Value != nonce) ||
             !Guid.TryParse(principal.FindFirst("tid")?.Value, out var tid) || tid != Guid.Parse(settings.DirectoryId) ||
             !Guid.TryParse(principal.FindFirst("oid")?.Value, out _))
             throw new SecurityTokenValidationException("Identity does not match this login transaction.");

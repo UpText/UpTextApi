@@ -39,20 +39,22 @@ internal static class SqlProcCodeBuilder
     private static string BuildPostTableProc(string service, string schema, SqlTableModel model, bool auth)
     {
         var columns = !model.IsIdentity ? model.Columns : model.NonKeyColumns;
+        var tenant = GetTenantColumn(model);
+        var parameters = columns.Where(column => column != tenant).ToList();
         var builder = new StringBuilder(6000)
             .AppendFormat("CREATE OR ALTER PROCEDURE {0}.{1}_post\r\n", service, model.Resource)
             .AppendLine("(");
 
         if (auth)
         {
-            builder.Append("    @auth_email NVARCHAR(255) = NULL")
-                .AppendLine(columns.Count > 0 ? "," : string.Empty);
+            builder.AppendLine("    @auth_email NVARCHAR(255) = NULL,");
         }
 
-        for (var index = 0; index < columns.Count; index++)
+        AppendTenantParameter(builder, model);
+        for (var index = 0; index < parameters.Count; index++)
         {
-            var column = columns[index];
-            var suffix = index < columns.Count - 1 ? "," : string.Empty;
+            var column = parameters[index];
+            var suffix = index < parameters.Count - 1 ? "," : string.Empty;
             if (column.SqlType.Contains("char", StringComparison.OrdinalIgnoreCase))
             {
                 builder.AppendFormat(
@@ -72,6 +74,7 @@ internal static class SqlProcCodeBuilder
             }
         }
 
+        TrimTrailingCommaLine(builder);
         builder.AppendLine(")")
             .AppendLine("AS")
             .AppendFormat("INSERT INTO {0}.{1}\r\n", schema, model.TableName)
@@ -92,12 +95,12 @@ internal static class SqlProcCodeBuilder
         {
             var column = columns[index];
             var suffix = index < columns.Count - 1 ? "," : string.Empty;
-            builder.AppendFormat("    @{0}{1}\r\n", column.Name, suffix);
+            builder.AppendFormat("    @{0}{1}\r\n", column == tenant ? "auth_tenant" : column.Name, suffix);
         }
 
         builder.AppendLine(")");
-        builder.AppendFormat("DECLARE @NEWID AS VARCHAR(max) = {0}\r\n", model.IsIdentity ? "SCOPE_IDENTITY()" : "@" + model.KeyColumn);
-        builder.AppendFormat("EXEC {0}.{1}_Get @ID = @NEWID\r\n", service, model.TableName);
+        builder.AppendFormat("DECLARE @NEWID AS VARCHAR(max) = {0}\r\n", model.IsIdentity ? "SCOPE_IDENTITY()" : tenant?.Name == model.KeyColumn ? "@auth_tenant" : "@" + model.KeyColumn);
+        builder.AppendFormat("EXEC {0}.{1}_Get @ID = @NEWID{2}\r\n", service, model.Resource, GetAuthArguments(model, auth));
         builder.AppendLine("RETURN 200 -- OK");
         return builder.ToString();
     }
@@ -108,27 +111,30 @@ internal static class SqlProcCodeBuilder
             .AppendFormat("CREATE OR ALTER PROCEDURE {0}.{1}_delete\r\n", service, model.Resource)
             .AppendLine("(");
 
-        builder.AppendLine(auth ? "    @ID varchar(max)," : "    @ID varchar(max)");
+        builder.AppendLine("    @ID varchar(max),");
         if (auth)
         {
-            builder.AppendLine("    @auth_email NVARCHAR(255) = NULL");
+            builder.AppendLine("    @auth_email NVARCHAR(255) = NULL,");
         }
 
+        AppendTenantParameter(builder, model);
+        TrimTrailingCommaLine(builder);
         builder.AppendLine(")");
         builder.AppendLine("AS");
-        builder.AppendFormat("IF NOT EXISTS (SELECT {2} FROM {0}.{1} WHERE @ID = {2})\r\n", schema, model.TableName, model.KeyColumn);
+        builder.AppendFormat("IF NOT EXISTS (SELECT {2} FROM {0}.{1} WHERE @ID = {2}{3})\r\n", schema, model.TableName, model.KeyColumn, GetTenantPredicate(model));
         builder.AppendLine("BEGIN");
         builder.AppendFormat("    RAISERROR('Unknown {0}', 1, 1)\r\n", model.Resource);
         builder.AppendLine("    RETURN 404");
         builder.AppendLine("END");
         builder.AppendFormat("DELETE FROM {0}.{1}\r\n", schema, model.TableName);
-        builder.AppendFormat("WHERE @ID = {0}\r\n", model.KeyColumn);
+        builder.AppendFormat("WHERE @ID = {0}{1}\r\n", model.KeyColumn, GetTenantPredicate(model));
         builder.AppendLine("RETURN 200 -- OK");
         return builder.ToString();
     }
 
     private static string BuildPutTableProc(string service, string schema, SqlTableModel model, bool auth)
     {
+        var columns = model.NonKeyColumns.Where(column => column != GetTenantColumn(model)).ToList();
         var builder = new StringBuilder(6000)
             .AppendFormat("CREATE OR ALTER PROCEDURE {0}.{1}_put\r\n", service, model.Resource)
             .AppendLine("(")
@@ -136,14 +142,14 @@ internal static class SqlProcCodeBuilder
 
         if (auth)
         {
-            builder.Append("    @auth_email NVARCHAR(255) = NULL")
-                .AppendLine(model.NonKeyColumns.Count > 0 ? "," : string.Empty);
+            builder.AppendLine("    @auth_email NVARCHAR(255) = NULL,");
         }
 
-        for (var index = 0; index < model.NonKeyColumns.Count; index++)
+        AppendTenantParameter(builder, model);
+        for (var index = 0; index < columns.Count; index++)
         {
-            var column = model.NonKeyColumns[index];
-            var suffix = index < model.NonKeyColumns.Count - 1 ? "," : string.Empty;
+            var column = columns[index];
+            var suffix = index < columns.Count - 1 ? "," : string.Empty;
 
             if (column.SqlType.Contains("char", StringComparison.OrdinalIgnoreCase))
             {
@@ -164,25 +170,29 @@ internal static class SqlProcCodeBuilder
             }
         }
 
+        TrimTrailingCommaLine(builder);
         builder.AppendLine(")")
             .AppendLine("AS")
-            .AppendFormat("IF NOT EXISTS (SELECT {0} FROM {1}.{2} WHERE @ID = {0})\r\n", model.KeyColumn, schema, model.TableName);
+            .AppendFormat("IF NOT EXISTS (SELECT {0} FROM {1}.{2} WHERE @ID = {0}{3})\r\n", model.KeyColumn, schema, model.TableName, GetTenantPredicate(model));
         builder.AppendLine("BEGIN");
         builder.AppendFormat("    RAISERROR('Unknown {0}', 1, 1)\r\n", model.Resource);
         builder.AppendLine("    RETURN 404");
         builder.AppendLine("END");
-        builder.AppendFormat("UPDATE {0}.{1}\r\n", schema, model.TableName);
-        builder.AppendLine("SET");
-
-        for (var index = 0; index < model.NonKeyColumns.Count; index++)
+        if (columns.Count > 0)
         {
-            var column = model.NonKeyColumns[index];
-            var suffix = index < model.NonKeyColumns.Count - 1 ? "," : string.Empty;
-            builder.AppendFormat("    {0} = COALESCE(@{0}, {0}){1}\r\n", column.Name, suffix);
-        }
+            builder.AppendFormat("UPDATE {0}.{1}\r\n", schema, model.TableName);
+            builder.AppendLine("SET");
 
-        builder.AppendFormat("WHERE @ID = {0}\r\n", model.KeyColumn);
-        builder.AppendFormat("EXEC {0}.{1}_Get @ID = @ID\r\n", service, model.TableName);
+            for (var index = 0; index < columns.Count; index++)
+            {
+                var column = columns[index];
+                var suffix = index < columns.Count - 1 ? "," : string.Empty;
+                builder.AppendFormat("    {0} = COALESCE(@{0}, {0}){1}\r\n", column.Name, suffix);
+            }
+
+            builder.AppendFormat("WHERE @ID = {0}{1}\r\n", model.KeyColumn, GetTenantPredicate(model));
+        }
+        builder.AppendFormat("EXEC {0}.{1}_Get @ID = @ID{2}\r\n", service, model.Resource, GetAuthArguments(model, auth));
         builder.AppendLine("RETURN 200 -- OK");
         return builder.ToString();
     }
@@ -200,6 +210,7 @@ internal static class SqlProcCodeBuilder
             builder.AppendLine("    @auth_email NVARCHAR(255) = NULL,");
         }
 
+        AppendTenantParameter(builder, model);
         if (search)
         {
             builder.AppendLine("    @filter varchar(max) = NULL,");
@@ -238,7 +249,7 @@ internal static class SqlProcCodeBuilder
         }
 
         builder.AppendFormat("\r\nFROM {0}.{1}\r\n", schema, model.TableName);
-        builder.AppendFormat("WHERE (@ID IS NULL OR @ID = {0})\r\n", model.KeyColumn);
+        builder.AppendFormat("WHERE (@ID IS NULL OR @ID = {0}){1}\r\n", model.KeyColumn, GetTenantPredicate(model));
 
         if (search && model.Columns.Count > 1)
         {
@@ -274,6 +285,33 @@ internal static class SqlProcCodeBuilder
 
         return builder.ToString();
     }
+
+    private static SqlTableColumn? GetTenantColumn(SqlTableModel model) =>
+        model.Columns.FirstOrDefault(column => column.Name.Equals("tenant", StringComparison.OrdinalIgnoreCase));
+
+    private static void AppendTenantParameter(StringBuilder builder, SqlTableModel model)
+    {
+        var tenant = GetTenantColumn(model);
+        if (tenant is null)
+        {
+            return;
+        }
+
+        var type = tenant.SqlType;
+        if (type.Contains("char", StringComparison.OrdinalIgnoreCase))
+        {
+            type += $"({(tenant.MaxLen is null or -1 ? "max" : tenant.MaxLen.Value.ToString())})";
+        }
+
+        builder.AppendFormat("    @auth_tenant {0},\r\n", type);
+    }
+
+    private static string GetTenantPredicate(SqlTableModel model) =>
+        GetTenantColumn(model) is { } tenant ? $" AND {tenant.Name} = @auth_tenant" : string.Empty;
+
+    private static string GetAuthArguments(SqlTableModel model, bool auth) =>
+        (auth ? ", @auth_email = @auth_email" : string.Empty) +
+        (GetTenantColumn(model) is not null ? ", @auth_tenant = @auth_tenant" : string.Empty);
 
     private static void TrimTrailingCommaLine(StringBuilder builder)
     {

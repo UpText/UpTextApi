@@ -97,3 +97,29 @@ The login state/completion store is deliberately single-process, bounded and sho
 New users receive `first_name` from the verified `given_name` ID-token claim and `last_name` from `family_name`. Login also fills missing name fields for invited or previously created Entra users, preserving any nonblank names maintained in CRM. Display names are not split to guess first/last names.
 
 The UpText CRM Login registration requests `given_name` and `family_name` as optional ID-token claims. Customer-owned app registrations should enable these under Token configuration, and the Entra user profile must contain the corresponding names. The login flow already requests the `profile` scope; no additional Graph permissions are required.
+
+## Self-service organization connections
+
+Tenant administrators can choose **Connect Microsoft organization** in Settings → Microsoft Entra login. Save pending settings first. Microsoft asks an organization administrator to consent to the shared UpText app's delegated `CRM.Connect` permission. This custom permission is admin-only and provides no Microsoft Graph, mail, contacts, or directory-listing access.
+
+The API uses `/organizations/v2.0/adminconsent`, then a tenant-specific authorization-code + PKCE flow. The admin-consent callback's `tenant` and `admin_consent` query parameters are **not** trusted as proof. Before enabling login, the API verifies a signed ID token (issuer, audience, directory, nonce, lifetime) and a signed v2 access token for the separate connection resource carrying `scp=CRM.Connect` and the same directory/object identity, with the shared client in `azp`. The short-lived completion also requires the initiating browser verifier and a current JWT for the same CRM tenant and administrator. SQL rechecks active administrator membership and atomically rejects concurrent configuration changes.
+
+Only that CRM tenant's Entra configuration changes. Existing settings, user roles, and identity bindings are preserved; connecting never links an account by email or grants CRM administrator rights. Existing users must be explicitly invited/linked. The completion screen shows the consenting user's Microsoft object ID for this purpose. Invite-only remains the default; admins can choose automatic standard-user provisioning separately. Reconnecting with another directory/client invalidates existing Entra bindings; retain a password administrator when changing providers.
+
+API deployment configuration:
+
+```json
+{
+  "Entra": {
+    "SharedClientId": "3b001657-7fda-4407-a7dc-27250b62c4b6",
+    "SharedResourceId": "cc5f8c55-4013-4c50-b9e8-a50e1f0aea06",
+    "SharedClientSecretUri": "https://uptextsecrets.vault.azure.net/secrets/uptext-crm-organizations-client-secret"
+  }
+}
+```
+
+The shared registration **UpText CRM Organizations** supports `AzureADMultipleOrgs`, requests `api://<SharedResourceId>/CRM.Connect` from the separate multitenant **UpText CRM Connection Permission** resource. That resource exposes an enabled **Admin** delegated scope, issues v2 access tokens (`api.requestedAccessTokenVersion=2`), and lists the shared client in `knownClientApplications` for bundled consent. The client lists the resource scope in `requiredResourceAccess`. A separate resource avoids Microsoft token-to-self consent exemptions. Register both `/auth/entra/callback` and `/auth/entra/onboarding/callback` under Web for each API deployment. The existing single-tenant **UpText CRM Login** registration remains available for manually configured tenants. The API runtime identity needs secret-get access to the shared credential in the approved vault. Deploy `crmauth.connection_post` with the CRM database project before enabling the feature. Its access follows the existing internal `crmauth` schema EXECUTE grant; never expose that schema through generic REST.
+
+The new endpoints are `/auth/entra/onboarding/options`, `POST .../start`, `GET .../launch`, `GET .../callback`, and `POST .../complete`. Browser transactions expire after 15 minutes and completions after two minutes. They use the same single-process/sticky-routing requirement as sign-in. External organizations' Conditional Access, consent policies, and publisher-verification requirements still apply. Do not claim another organization's consent is verified until a real administrator completes the live flow.
+
+Production rollout on 2026-11-16 uses versioned `uptext/uptextapi:entra-selfservice-20261116` and `uptext/uptextcrm:entra-selfservice-20261116` images on `upubuntu01`. The previous images are tagged `before-entra-selfservice`; production `.env.before-entra-selfservice` and `.azure-production.env.before-entra-selfservice` retain rollback configuration. The shared app credential expires 2027-11-16 18:52:24 UTC. The app currently has no verified publisher; organizations that require verified publishers may block consent. Publisher/domain verification is separate from app registration and has not been completed.

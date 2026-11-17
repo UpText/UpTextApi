@@ -976,6 +976,13 @@ Optional flags:
 - `Paging=true`
 - `Sort=true`
 - `Search=true`
+- `Auth=true` (adds `@auth_email`)
+
+Tables with a `tenant` column automatically receive a required `@auth_tenant`
+parameter matching the column type, regardless of the `Auth` flag. Generated GET,
+PUT, and DELETE procedures filter by `tenant = @auth_tenant`, including existence
+checks. POST inserts the authenticated tenant, and PUT leaves the tenant unchanged.
+POST and PUT pass authentication parameters to the generated GET procedure.
 
 Set `Services:{service}:SqlGenerator` to `false` to disable SQL generation and
 hide that service's generator link from the home page. The setting defaults to
