@@ -44,7 +44,11 @@ public static class EntraLogin
         group.MapGet("/options", async (string tenant, EntraStore store, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(tenant) || tenant.Length > 255) return Results.BadRequest();
-            return Results.Ok(new { enabled = (await store.Settings(tenant, ct)).Enabled });
+            var settings = await store.Settings(tenant, ct);
+            return Results.Ok(new {
+                enabled = settings.Enabled,
+                organizationDisplayName = settings.Enabled ? settings.OrganizationDisplayName?.Trim() : null
+            });
         });
         group.MapGet("/start", Start);
         group.MapGet("/callback", Callback);

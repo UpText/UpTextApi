@@ -5,6 +5,7 @@ namespace UpTextApi.Services;
 public sealed record EntraSettings
 {
     public bool Enabled { get; init; }
+    public string OrganizationDisplayName { get; init; } = "";
     public string DirectoryId { get; init; } = "";
     public string ClientId { get; init; } = "";
     public string ClientSecretUri { get; init; } = "";
